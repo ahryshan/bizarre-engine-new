@@ -1,6 +1,11 @@
 [package]
-name = "bizarre-engine-new"
+name = "bizarre-engine"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bizarre_app = { path = "./crates/bizarre_app/" }
+
+[workspace]
+members = ["crates/bizarre_app", "./", "sandbox"]
+default-members = ["sandbox"]
