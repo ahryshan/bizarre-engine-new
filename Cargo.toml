@@ -5,7 +5,13 @@ edition = "2021"
 
 [dependencies]
 bizarre_app = { path = "./crates/bizarre_app/" }
+bizarre_window = { path = "./crates/bizarre_window/" }
+
 
 [workspace]
-members = ["crates/bizarre_app", "./", "sandbox"]
+members = ["crates/bizarre_app", "./", "sandbox", "crates/bizarre_window"]
 default-members = ["sandbox"]
+
+[workspace.dependencies]
+nalgebra-glm = "0.18.0"
+anyhow = "1.0.82"

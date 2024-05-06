@@ -1,0 +1,14 @@
+[package]
+name = "bizarre_window"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcb = { version = "1.4.0", features = ["debug_atom_names"] }
+nalgebra-glm = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = ["x11", "wayland"]
+x11 = []
+wayland = []
