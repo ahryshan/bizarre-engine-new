@@ -55,4 +55,6 @@ pub trait WindowTrait {
     fn restore(&mut self) -> anyhow::Result<()>;
     fn maximize(&mut self) -> anyhow::Result<()>;
     fn unmaximize(&mut self) -> anyhow::Result<()>;
+
+    fn close_requested(&self) -> bool;
 }

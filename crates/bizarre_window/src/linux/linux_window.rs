@@ -15,7 +15,23 @@ enum __Display {
 }
 
 static DISPLAY: LazyLock<__Display> = LazyLock::new(|| {
-    if cfg!(all(feature = "wayland", feature = "x11")) {
+    if let Ok(value) = std::env::var("__BE_FORCE_DISPLAY") {
+        match value.as_str() {
+            "x11" => {
+                #[cfg(not(feature = "x11"))]
+                panic!("Cannot run with __BE_FORCE_DISPLAY=x11 when X11 support is not included into the compilation");
+                __Display::X11
+            }
+            "wayland" => {
+                #[cfg(not(feature = "wayland"))]
+                panic!("Cannot run with __BE_FORCE_DISPLAY=wayland when Wayland support is not included into the compilation");
+                __Display::Wayland
+            }
+            _ => {
+                panic!("Unknown __BE_FORCE_DISPLAY value: {value}")
+            }
+        }
+    } else if cfg!(all(feature = "wayland", feature = "x11")) {
         match std::env::var("WAYLAND_DISPLAY") {
             Ok(_) => __Display::Wayland,
             Err(_) => __Display::X11,
@@ -114,5 +130,9 @@ impl WindowTrait for LinuxWindow {
 
     fn unmaximize(&mut self) -> anyhow::Result<()> {
         self.inner.unmaximize()
+    }
+
+    fn close_requested(&self) -> bool {
+        self.inner.close_requested()
     }
 }

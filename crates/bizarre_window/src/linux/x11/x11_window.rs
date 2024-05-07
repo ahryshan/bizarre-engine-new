@@ -572,6 +572,10 @@ impl WindowTrait for X11Window {
 
         Ok(())
     }
+
+    fn close_requested(&self) -> bool {
+        todo!()
+    }
 }
 
 impl Drop for X11Window {
