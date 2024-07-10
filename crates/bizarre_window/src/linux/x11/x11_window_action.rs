@@ -4,7 +4,7 @@ use xcb::x;
 
 use crate::WindowAction;
 
-use super::connection::get_x11_connection;
+use super::connection::get_x11_context;
 
 xcb::atoms_struct! {
 #[derive(Clone, Copy, Debug)]
@@ -22,7 +22,7 @@ pub(crate) struct X11WindowActionAtoms {
 }
 
 static WINDOW_ACTION_ATOMS: LazyLock<X11WindowActionAtoms> = LazyLock::new(|| {
-    let conn = get_x11_connection();
+    let conn = &get_x11_context().conn;
     X11WindowActionAtoms::intern_all(conn).unwrap()
 });
 

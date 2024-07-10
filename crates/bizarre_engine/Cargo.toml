@@ -1,0 +1,9 @@
+[package]
+name = "bizarre_engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bizarre_app = { version = "0.1.0", path = "../bizarre_app" }
+bizarre_event = { version = "0.1.0", path = "../bizarre_event" }
+bizarre_window = { version = "0.1.0", path = "../bizarre_window" }

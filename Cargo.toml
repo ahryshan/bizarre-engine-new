@@ -1,16 +1,13 @@
-[package]
-name = "bizarre-engine"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-bizarre_app = { path = "./crates/bizarre_app/" }
-bizarre_window = { path = "./crates/bizarre_window/" }
-
-
 [workspace]
-members = ["crates/bizarre_app", "./", "sandbox", "crates/bizarre_window"]
-default-members = ["sandbox"]
+resolver = "2"
+members = [
+    "sandbox",
+    "crates/bizarre_app",
+    "crates/bizarre_window",
+    "crates/bizarre_event",
+    "crates/bizarre_engine",
+]
+default-members = ["sandbox", "crates/bizarre_engine"]
 
 [workspace.dependencies]
 nalgebra-glm = "0.18.0"

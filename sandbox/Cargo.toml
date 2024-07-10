@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bizarre-engine = { path = ".." }
+bizarre_engine = { version = "0.1.0", path = "../crates/bizarre_engine" }
 nalgebra-glm = { workspace = true }

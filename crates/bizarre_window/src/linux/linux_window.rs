@@ -2,7 +2,11 @@ use std::sync::LazyLock;
 
 use crate::WindowTrait;
 
-use super::{wayland::wayland_window::WaylandWindow, x11::x11_window::X11Window};
+#[cfg(feature = "wayland")]
+use super::wayland::wayland_window::WaylandWindow;
+
+#[cfg(feature = "x11")]
+use super::x11::x11_window::X11Window;
 
 pub struct LinuxWindow {
     inner: Box<dyn WindowTrait>,
@@ -50,9 +54,14 @@ impl WindowTrait for LinuxWindow {
     where
         Self: Sized,
     {
-        let inner: Box<dyn WindowTrait> = match *DISPLAY {
+        let display = DISPLAY.clone();
+        let inner: Box<dyn WindowTrait> = match display {
             __Display::X11 => Box::new(X11Window::new(create_info)?),
+            #[cfg(feature = "wayland")]
             __Display::Wayland => Box::new(WaylandWindow::new(create_info)?),
+            _ => panic!(
+                "Cannot create window, because support for display server not present: {display:?}"
+            ),
         };
 
         Ok(Self { inner })

@@ -9,7 +9,10 @@ use crate::{
     WindowCreateInfo,
 };
 
-use super::{connection::get_x11_connection, motif_hints::MotifHints};
+use super::{
+    connection::{get_x11_context, X11Context},
+    motif_hints::MotifHints,
+};
 
 xcb::atoms_struct! {
     #[derive(Clone, Copy, Debug)]
@@ -51,7 +54,7 @@ impl X11Window {
         const INITIAL_READ_LEN: u32 = 32;
 
         let mut props = vec![];
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let reply = conn.wait_for_reply(conn.send_request(&x::GetProperty {
             delete: false,
             long_offset: 0,
@@ -96,7 +99,7 @@ impl X11Window {
         if self.__no_wm_state_add_remove {
             let props = self.get_full_property::<x::Atom>(self.atoms.wm_state, x::ATOM_ATOM)?;
             let filtered = Self::filter_props(&props, to_remove);
-            let conn = get_x11_connection();
+            let conn = &get_x11_context().conn;
             conn.check_request(conn.send_request_checked(&x::ChangeProperty {
                 mode: x::PropMode::Replace,
                 window: self.id,
@@ -106,7 +109,9 @@ impl X11Window {
             }))?;
             Ok(())
         } else {
-            let conn = get_x11_connection();
+            let X11Context {
+                conn, screen_num, ..
+            } = get_x11_context();
             to_remove
                 .chunks(2)
                 .map(|atoms| {
@@ -124,11 +129,7 @@ impl X11Window {
                         0,
                     ]);
                     let event = x::ClientMessageEvent::new(self.id, self.atoms.wm_state, data);
-                    let screen = conn
-                        .get_setup()
-                        .roots()
-                        .nth(conn.screen_num as usize)
-                        .unwrap();
+                    let screen = conn.get_setup().roots().nth(*screen_num as usize).unwrap();
                     conn.send_request_checked(&x::SendEvent {
                         propagate: false,
                         destination: x::SendEventDest::Window(screen.root()),
@@ -144,7 +145,7 @@ impl X11Window {
 
     fn add_wm_state(&self, to_add: &[x::Atom]) -> anyhow::Result<()> {
         if self.__no_wm_state_add_remove {
-            let conn = get_x11_connection();
+            let conn = &get_x11_context().conn;
             conn.check_request(conn.send_request_checked(&x::ChangeProperty {
                 mode: x::PropMode::Append,
                 property: self.atoms.wm_state,
@@ -154,7 +155,10 @@ impl X11Window {
             }))?;
             Ok(())
         } else {
-            let conn = get_x11_connection();
+            let X11Context {
+                conn, screen_num, ..
+            } = get_x11_context();
+            let screen_num = *screen_num;
             to_add
                 .chunks(2)
                 .map(|atoms| {
@@ -172,11 +176,7 @@ impl X11Window {
                         0,
                     ]);
                     let event = x::ClientMessageEvent::new(self.id, self.atoms.wm_state, data);
-                    let screen = conn
-                        .get_setup()
-                        .roots()
-                        .nth(conn.screen_num as usize)
-                        .unwrap();
+                    let screen = conn.get_setup().roots().nth(screen_num as usize).unwrap();
                     conn.send_request_checked(&x::SendEvent {
                         propagate: false,
                         destination: x::SendEventDest::Window(screen.root()),
@@ -196,9 +196,11 @@ impl WindowTrait for X11Window {
     where
         Self: Sized,
     {
-        let conn = get_x11_connection();
+        let X11Context {
+            conn, screen_num, ..
+        } = get_x11_context();
         let setup = conn.get_setup();
-        let screen = setup.roots().nth(conn.screen_num as usize).unwrap();
+        let screen = setup.roots().nth(*screen_num as usize).unwrap();
 
         let window: x::Window = conn.generate_id();
 
@@ -338,7 +340,7 @@ impl WindowTrait for X11Window {
     }
 
     fn update_size_and_position(&mut self) -> anyhow::Result<(UVec2, IVec2)> {
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let geometry = conn.wait_for_reply(conn.send_request(&x::GetGeometry {
             drawable: x::Drawable::Window(self.id),
         }))?;
@@ -365,7 +367,7 @@ impl WindowTrait for X11Window {
             return Ok(());
         }
 
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let cookie = conn.send_request_checked(&x::ConfigureWindow {
             window: self.id,
             value_list: &[
@@ -386,7 +388,7 @@ impl WindowTrait for X11Window {
             return Ok(());
         }
 
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let cookie = conn.send_request_checked(&x::ConfigureWindow {
             window: self.id,
             value_list: &[
@@ -403,7 +405,7 @@ impl WindowTrait for X11Window {
     }
 
     fn set_mode(&mut self, mode: crate::window::WindowMode) -> anyhow::Result<()> {
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
 
         let was_mapped = self.mapped;
 
@@ -450,7 +452,7 @@ impl WindowTrait for X11Window {
             return Ok(());
         }
 
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
 
         conn.check_request(conn.send_request_checked(&x::MapWindow { window: self.id }))?;
 
@@ -463,7 +465,7 @@ impl WindowTrait for X11Window {
             return Ok(());
         }
 
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
 
         conn.check_request(conn.send_request_checked(&x::UnmapWindow { window: self.id }))?;
 
@@ -484,7 +486,7 @@ impl WindowTrait for X11Window {
             return Ok(());
         }
 
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
 
         let cookie = conn.send_request_checked(&x::ChangeProperty {
             mode: x::PropMode::Replace,
@@ -501,7 +503,7 @@ impl WindowTrait for X11Window {
     }
 
     fn minimize(&mut self) -> anyhow::Result<()> {
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let cookie = conn.send_request_checked(&x::ChangeProperty {
             property: self.atoms.wm_state,
             r#type: x::ATOM_ATOM,
@@ -524,7 +526,7 @@ impl WindowTrait for X11Window {
     fn restore(&mut self) -> anyhow::Result<()> {
         let wm_state = self.get_full_property(self.atoms.wm_state, x::ATOM_ATOM)?;
         let wm_state = Self::filter_props(&wm_state, &[self.atoms.wm_state_hidden]);
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let cookie = conn.send_request_checked(&x::ChangeProperty {
             mode: x::PropMode::Replace,
             window: self.id,
@@ -559,7 +561,7 @@ impl WindowTrait for X11Window {
             MotifHints::no_decorations()
         };
 
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         conn.check_request(conn.send_request_checked(&x::ChangeProperty {
             mode: x::PropMode::Replace,
             window: self.id,
@@ -580,7 +582,7 @@ impl WindowTrait for X11Window {
 
 impl Drop for X11Window {
     fn drop(&mut self) {
-        let conn = get_x11_connection();
+        let conn = &get_x11_context().conn;
         let result =
             conn.check_request(conn.send_request_checked(&x::DestroyWindow { window: self.id }));
 

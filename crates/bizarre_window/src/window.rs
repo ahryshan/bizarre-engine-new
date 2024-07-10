@@ -16,6 +16,19 @@ pub struct WindowStatus {
     pub mapped: bool,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+pub struct WindowHandle(u32);
+
+impl WindowHandle {
+    pub fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    pub fn as_raw(&self) -> u32 {
+        self.0
+    }
+}
+
 pub trait WindowTrait {
     fn new(create_info: &WindowCreateInfo) -> anyhow::Result<Self>
     where
