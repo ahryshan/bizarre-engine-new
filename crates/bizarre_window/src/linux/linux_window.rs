@@ -89,6 +89,10 @@ impl WindowTrait for LinuxWindow {
         self.inner.raw_handle()
     }
 
+    fn handle(&self) -> crate::window::WindowHandle {
+        self.inner.handle()
+    }
+
     fn title(&self) -> &str {
         self.inner.title()
     }
@@ -143,5 +147,12 @@ impl WindowTrait for LinuxWindow {
 
     fn close_requested(&self) -> bool {
         self.inner.close_requested()
+    }
+
+    fn drain_events_to_queue(
+        &mut self,
+        event_queue: &mut bizarre_event::EventQueue,
+    ) -> anyhow::Result<()> {
+        self.inner.drain_events_to_queue(event_queue)
     }
 }

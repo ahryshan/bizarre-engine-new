@@ -6,9 +6,11 @@ members = [
     "crates/bizarre_window",
     "crates/bizarre_event",
     "crates/bizarre_engine",
+    "crates/bizarre_core",
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 
 [workspace.dependencies]
 nalgebra-glm = "0.18.0"
 anyhow = "1.0.82"
+thiserror = "1.0.61"

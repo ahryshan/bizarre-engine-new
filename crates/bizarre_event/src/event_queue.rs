@@ -25,7 +25,7 @@ impl EventQueue {
         EventReader { id }
     }
 
-    pub fn register_reader<E>(&mut self, reader: EventReader) -> Result<()>
+    pub fn register_reader<'a, E>(&mut self, reader: EventReader) -> Result<()>
     where
         E: Event,
     {
@@ -33,13 +33,12 @@ impl EventQueue {
             return Err(anyhow!("Cannot add a reader not created by this EventQueue (reader id: {}, last created reader: {})", reader.id, self.next_reader_id - 1));
         }
 
-        match self.get_queue_mut::<E>() {
-            Some(queue) => queue.add_reader(reader),
-            None => {
-                self.add_queue::<E>()
-                    .map_err(|err| anyhow!("Cannot add reader: {err}"))?;
-                self.get_queue_mut::<E>().unwrap().add_reader(reader);
-            }
+        if let Some(queue) = self.get_queue_mut::<E>() {
+            queue.add_reader(reader);
+        } else {
+            let mut q = TypedEventQueue::new::<E>();
+            q.add_reader(reader);
+            self.queues.insert(TypeId::of::<E>(), q);
         }
 
         Ok(())
@@ -49,13 +48,12 @@ impl EventQueue {
     where
         E: Event,
     {
-        match self.get_queue_mut::<E>() {
-            Some(q) => q.push_event(event),
-            None => {
-                self.add_queue::<E>()
-                    .map_err(|err| anyhow!("Failed to push event to queue: {err}"))?;
-                self.get_queue_mut::<E>().unwrap().push_event(event);
-            }
+        if let Some(q) = self.get_queue_mut::<E>() {
+            q.push_event(event);
+        } else {
+            let mut q = TypedEventQueue::new::<E>();
+            q.push_event(event);
+            self.queues.insert(TypeId::of::<E>(), q);
         }
         Ok(())
     }
@@ -69,33 +67,17 @@ impl EventQueue {
             .map(|q| q.poll_event(reader))?
     }
 
+    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Result<Option<Box<[E]>>>
+    where
+        E: Event + Clone,
+    {
+        self.get_queue_mut::<E>()
+            .ok_or(anyhow!("Cannot pull events: There is no queue to read"))
+            .map(|q| q.pull_events(reader))?
+    }
+
     pub fn change_frames(&mut self) {
         self.queues.values_mut().for_each(|q| q.swap_buffers());
-    }
-
-    fn add_queue<E>(&mut self) -> Result<()>
-    where
-        E: Event,
-    {
-        let ev_type_id = TypeId::of::<E>();
-        if self.queues.contains_key(&ev_type_id) {
-            return Err(anyhow!(
-                "Cannot add sub-queue for a event {}. There is already one",
-                std::any::type_name::<E>()
-            ));
-        }
-
-        self.queues.insert(ev_type_id, TypedEventQueue::new::<E>());
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn get_queue<E>(&self) -> Option<&TypedEventQueue>
-    where
-        E: Event,
-    {
-        let ev_type_id = TypeId::of::<E>();
-        self.queues.get(&ev_type_id)
     }
 
     #[inline(always)]
@@ -112,7 +94,7 @@ impl EventQueue {
 mod tests {
     use anyhow::Result;
 
-    use crate::{Event, EventQueue};
+    use crate::EventQueue;
 
     #[derive(Clone, Copy, PartialEq, Debug)]
     struct TestEvent1 {

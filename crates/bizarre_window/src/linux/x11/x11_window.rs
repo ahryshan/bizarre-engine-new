@@ -1,16 +1,17 @@
 use std::fmt::Debug;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use nalgebra_glm::{IVec2, UVec2};
 use xcb::{x, Xid};
 
 use crate::{
-    window::{WindowMode, WindowTrait},
+    window::{WindowHandle, WindowMode, WindowTrait},
+    window_events::WindowEvent,
     WindowCreateInfo,
 };
 
 use super::{
-    connection::{get_x11_context, X11Context},
+    connection::{get_x11_context, get_x11_context_mut, X11Context},
     motif_hints::MotifHints,
 };
 
@@ -43,6 +44,7 @@ pub struct X11Window {
     pub(crate) minimized: bool,
     pub(crate) maximized: bool,
     pub(crate) mapped: bool,
+    pub(crate) close_requested: bool,
     pub(crate) __no_wm_state_add_remove: bool,
 }
 
@@ -328,6 +330,7 @@ impl WindowTrait for X11Window {
             title: create_info.title.clone(),
             maximized: create_info.maximized,
             minimized: create_info.minimized,
+            close_requested: false,
             atoms,
             __no_wm_state_add_remove,
         };
@@ -477,6 +480,10 @@ impl WindowTrait for X11Window {
         self.id.resource_id()
     }
 
+    fn handle(&self) -> WindowHandle {
+        WindowHandle::from_raw(self.id.resource_id())
+    }
+
     fn title(&self) -> &str {
         &self.title
     }
@@ -576,7 +583,74 @@ impl WindowTrait for X11Window {
     }
 
     fn close_requested(&self) -> bool {
-        todo!()
+        self.close_requested
+    }
+
+    fn drain_events_to_queue(
+        &mut self,
+        event_queue: &mut bizarre_event::EventQueue,
+    ) -> anyhow::Result<()> {
+        // TODO: Move this to some App system
+        get_x11_context_mut().drain_system_events()?;
+
+        let context_queue = &mut get_x11_context_mut().event_queue;
+        let events = context_queue.get_events_for_window(self.handle());
+
+        if let None = events {
+            return Ok(());
+        }
+
+        (*events.unwrap())
+            .iter()
+            .map(|ev| {
+                match ev {
+                    WindowEvent::X11ConfigureNotify {
+                        handle,
+                        position,
+                        size,
+                    } => {
+                        if position != &self.position {
+                            let event = WindowEvent::WindowMoved {
+                                handle: *handle,
+                                position: *position,
+                            };
+                            self.position = *position;
+                            event_queue.push_event(event)?;
+                        }
+
+                        if size != &self.size {
+                            let event = WindowEvent::WindowResized {
+                                handle: *handle,
+                                size: *size,
+                            };
+                            self.size = *size;
+                            event_queue.push_event(event)?;
+                        }
+                    }
+                    WindowEvent::X11ClientMessage {
+                        handle,
+                        data: x::ClientMessageData::Data32([atom, ..]),
+                    } => {
+                        if atom == &self.atoms.delete_window.resource_id() {
+                            self.close_requested = true;
+                            let event = WindowEvent::WindowClosed(*handle);
+                            event_queue.push_event(event)?;
+                        } else {
+                            event_queue.push_event(ev.clone())?;
+                        }
+                    }
+
+                    WindowEvent::WindowClosed(..) => {
+                        self.close_requested = true;
+                        event_queue.push_event(ev.clone())?
+                    }
+                    _ => event_queue.push_event(ev.clone())?,
+                }
+                Ok(())
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(())
     }
 }
 

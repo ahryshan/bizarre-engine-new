@@ -1,3 +1,6 @@
+#![feature(negative_impls)]
+#![feature(auto_traits)]
+
 mod event;
 mod event_queue;
 mod event_reader;

@@ -1,21 +1,13 @@
-use std::{
-    collections::BTreeMap,
-    sync::{LazyLock, Once},
-};
+use std::sync::Once;
 
-use xcb::{x, Event};
+use anyhow::Result;
 
-use crate::window::WindowHandle;
-
-#[derive(Default)]
-pub struct X11EventQueue {
-    window_events: BTreeMap<WindowHandle, xcb::Event>,
-    common_events: Vec<xcb::Event>,
-}
+use super::x11_event_queue::X11EventQueue;
 
 pub struct X11Context {
     pub conn: xcb::Connection,
     pub screen_num: i32,
+    pub event_queue: X11EventQueue,
 }
 
 static mut CONTEXT: Option<X11Context> = None;
@@ -28,6 +20,7 @@ fn init_x11_context() {
             .map(|(connection, screen_num)| X11Context {
                 conn: connection,
                 screen_num,
+                event_queue: Default::default(),
             })
             .unwrap()
             .into();
@@ -44,4 +37,14 @@ pub fn get_x11_context_mut() -> &'static mut X11Context {
     CONTEXT_INIT.call_once(init_x11_context);
 
     unsafe { CONTEXT.as_mut().unwrap() }
+}
+
+impl X11Context {
+    pub fn drain_system_events(&mut self) -> Result<()> {
+        while let Some(xcb_event) = self.conn.poll_for_event()? {
+            self.event_queue.handle_event(xcb_event);
+        }
+
+        Ok(())
+    }
 }
