@@ -1,38 +1,30 @@
-use std::{thread::sleep, time::Duration};
+use bizarre_engine::ecs::world::World;
 
-use bizarre_engine::{
-    event::EventQueue,
-    window::{window_events::WindowEvent, Window, WindowCreateInfo, WindowTrait},
-};
+#[derive(Debug)]
+pub struct Res {
+    name: &'static str,
+}
+
+fn print_res(res: &Res) {
+    dbg!(res);
+}
 
 fn main() {
-    let create_info = WindowCreateInfo::normal_window("Bizarre Window".into(), [600, 400].into());
+    let mut world = World::default();
 
-    let mut window = Window::new(&create_info).unwrap();
-    window.map().unwrap();
+    let res = Res { name: "John" };
+    world.insert_resource(res).unwrap();
 
-    let mut event_queue = EventQueue::default();
-    let window_event_reader = event_queue.create_reader();
-    event_queue
-        .register_reader::<WindowEvent>(window_event_reader)
-        .unwrap();
+    world.with_resource(print_res).unwrap();
+    let _ = world.with_resource_mut(|res: &mut Res| res.name = "George");
+    let _ = world.with_resource(print_res);
 
-    let mut frame_index = 0;
+    let removed_res = world.remove_resource::<Res>().unwrap();
+    dbg!(removed_res);
+}
 
-    while !window.close_requested() {
-        event_queue.change_frames();
-        let _ = window.drain_events_to_queue(&mut event_queue);
-
-        let count = event_queue
-            .pull_events::<WindowEvent>(&window_event_reader)
-            .unwrap()
-            .map(|ev| ev.len());
-
-        if let Some(count) = count {
-            if count > 0 {
-                println!("Got {count} Window Events on frame #{frame_index}");
-                frame_index += 1;
-            }
-        }
+impl Drop for Res {
+    fn drop(&mut self) {
+        println!("{} was dropped", self.name);
     }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "bizarre_ecs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[features]
+default = ["reflect"]
+
+reflect = ["resource_reflect"]
+resource_reflect = []

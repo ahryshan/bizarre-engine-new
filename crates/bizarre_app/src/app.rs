@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use anyhow::Result;
 use bizarre_event::{EventQueue, EventReader};
 
@@ -31,10 +33,26 @@ impl App {
     pub fn run(&mut self) -> Result<()> {
         self.running = true;
 
+        const FRAME_TARGET_TIME: Duration = Duration::from_millis(1000 / 60);
+
+        let mut frame = 0;
+
         while self.running {
+            let frame_start = Instant::now();
+
+            println!("Frame #{frame}");
+            frame += 1;
+
             self.event_queue.change_frames();
 
             self.pump_app_events()?;
+
+            let frame_end = Instant::now();
+            let frame_duration = frame_end - frame_start;
+
+            if frame_duration <= FRAME_TARGET_TIME {
+                std::thread::sleep(FRAME_TARGET_TIME - frame_duration);
+            }
         }
 
         Ok(())
@@ -47,6 +65,7 @@ impl App {
         {
             match ev {
                 AppEvent::CloseRequested => {
+                    println!("Got AppEvent::CloseRequested!");
                     self.running = false;
                     self.event_queue.push_event(AppEvent::WillClose)?
                 }
