@@ -6,11 +6,11 @@ use std::{
     },
 };
 
-use super::resource::{IntoResource, RegisteredResource, ResourceError};
+use super::resource::{IntoResource, Resource, ResourceData, ResourceError};
 
 #[derive(Default)]
 pub struct ResourceRegistry {
-    resources: Vec<Option<RwLock<RegisteredResource>>>,
+    resources: Vec<Option<Resource>>,
     type_map: BTreeMap<TypeId, usize>,
     index_dumpster: VecDeque<usize>,
 }
@@ -31,12 +31,11 @@ impl ResourceRegistry {
             let index = if let Some(index) = self.index_dumpster.pop_front() {
                 let removed = self.resources[index].take();
                 drop(removed);
-                self.resources[index] = Some(RwLock::new(resource.into_resource()));
+                self.resources[index] = Some(resource.into_resource());
                 index
             } else {
                 let index = self.resources.len();
-                self.resources
-                    .push(Some(RwLock::new(resource.into_resource())));
+                self.resources.push(Some(resource.into_resource()));
                 index
             };
             self.type_map.insert(type_id, index);
@@ -52,12 +51,7 @@ impl ResourceRegistry {
         match self.type_map.remove(&type_id) {
             Some(index) => {
                 self.index_dumpster.push_back(index);
-                let res = self.resources[index]
-                    .take()
-                    .unwrap()
-                    .into_inner()
-                    .unwrap()
-                    .into_inner();
+                let res = self.resources[index].take().unwrap().into_inner();
 
                 Ok(res)
             }

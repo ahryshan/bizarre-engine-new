@@ -1,16 +1,45 @@
 use std::{
     alloc::Layout,
     any::{type_name, TypeId},
+    ops::{Deref, DerefMut},
+    sync::RwLock,
 };
 
 use thiserror::Error;
 
+pub struct Resource {
+    data: RwLock<ResourceData>,
+}
+
+impl Resource {
+    pub fn into_inner<T>(self) -> T
+    where
+        T: 'static,
+    {
+        self.data.into_inner().unwrap().into_inner()
+    }
+}
+
+impl Deref for Resource {
+    type Target = RwLock<ResourceData>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl DerefMut for Resource {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
 #[derive(Debug)]
-pub struct RegisteredResource {
+pub struct ResourceData {
     type_id: TypeId,
     data: *mut (),
-    size: usize,
     type_name: &'static str,
+    layout: Layout,
 }
 
 #[derive(Error, Debug)]
@@ -29,7 +58,7 @@ pub enum ResourceError {
 }
 
 impl ResourceError {
-    pub fn cannot_convert<T>(resource: &RegisteredResource) -> ResourceError {
+    pub fn cannot_convert<T>(resource: &ResourceData) -> ResourceError {
         Self::CannotConvert {
             expected: resource.type_name,
             found: type_name::<T>(),
@@ -49,7 +78,7 @@ impl ResourceError {
     }
 }
 
-impl RegisteredResource {
+impl ResourceData {
     pub fn as_ref<T>(&self) -> Result<&T, ResourceError>
     where
         T: 'static,
@@ -94,28 +123,31 @@ impl RegisteredResource {
 }
 
 pub trait IntoResource {
-    fn into_resource(self) -> RegisteredResource;
+    fn into_resource(self) -> Resource;
 }
 
 impl<T> IntoResource for T
 where
     T: 'static + Send + Sync + Sized,
 {
-    fn into_resource(self) -> RegisteredResource {
-        let size = size_of::<Self>();
+    fn into_resource(self) -> Resource {
         let data = {
             let boxed = Box::new(self);
             Box::into_raw(boxed) as *mut ()
         };
         let type_id = TypeId::of::<Self>();
         let type_name = type_name::<Self>();
+        let layout =
+            unsafe { Layout::from_size_align_unchecked(size_of::<Self>(), align_of::<Self>()) };
 
-        let res = RegisteredResource {
+        let res = ResourceData {
             data,
-            size,
+            layout,
             type_id,
             type_name,
         };
-        res
+        Resource {
+            data: RwLock::new(res),
+        }
     }
 }
