@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    collections::{BTreeMap, VecDeque},
+    collections::{btree_map, BTreeMap, VecDeque},
     sync::{
         MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
@@ -25,12 +25,8 @@ impl ResourceRegistry {
         T: IntoResource + 'static,
     {
         let type_id = TypeId::of::<T>();
-        if self.type_map.contains_key(&type_id) {
-            Err(ResourceError::already_present::<T>())
-        } else {
+        if let btree_map::Entry::Vacant(e) = self.type_map.entry(type_id) {
             let index = if let Some(index) = self.index_dumpster.pop_front() {
-                let removed = self.resources[index].take();
-                drop(removed);
                 self.resources[index] = Some(resource.into_resource());
                 index
             } else {
@@ -38,8 +34,10 @@ impl ResourceRegistry {
                 self.resources.push(Some(resource.into_resource()));
                 index
             };
-            self.type_map.insert(type_id, index);
+            e.insert(index);
             Ok(())
+        } else {
+            Err(ResourceError::already_present::<T>())
         }
     }
 

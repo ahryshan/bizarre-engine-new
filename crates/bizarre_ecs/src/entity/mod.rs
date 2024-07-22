@@ -5,7 +5,9 @@ pub mod entity_builder;
 pub mod fetch;
 pub mod fetch_mut;
 pub mod query;
+pub mod query_data;
 pub mod query_element;
+pub mod query_iterator;
 
 use std::ops::{Add, AddAssign};
 
