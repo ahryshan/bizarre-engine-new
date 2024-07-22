@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use crate::world::World;
 
 use super::query_data::QueryData;
 

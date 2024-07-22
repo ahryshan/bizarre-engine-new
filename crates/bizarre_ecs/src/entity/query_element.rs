@@ -1,4 +1,4 @@
-use std::{any::TypeId, ops::Deref};
+use std::any::TypeId;
 
 use super::component_storage::Component;
 

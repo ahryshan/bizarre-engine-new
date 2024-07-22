@@ -18,7 +18,7 @@ pub struct Entity {
 }
 
 impl Entity {
-    pub const GEN_SHIFT: usize = size_of::<usize>() * 8 - 8;
+    pub const GEN_SHIFT: usize = usize::BITS as usize - 8;
 
     pub fn new(id: usize, gen: u8) -> Entity {
         Self {

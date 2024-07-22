@@ -1,6 +1,5 @@
 use std::any::TypeId;
 
-use crate::world::World;
 
 use super::{
     component_storage::Component, query_element::QueryElement, query_iterator::QueryIterator,

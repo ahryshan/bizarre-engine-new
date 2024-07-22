@@ -1,12 +1,10 @@
 use std::{
     any::TypeId,
     collections::{btree_map, BTreeMap, VecDeque},
-    sync::{
-        MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
-    },
+    sync::{MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use super::resource::{IntoResource, Resource, ResourceData, ResourceError};
+use super::{IntoResource, Resource, ResourceError};
 
 #[derive(Default)]
 pub struct ResourceRegistry {
@@ -110,7 +108,7 @@ impl ResourceRegistry {
     pub fn with_resource<T, F>(&self, func: F) -> ResourceResult<()>
     where
         T: 'static,
-        F: FnOnce(&T) -> (),
+        F: FnOnce(&T),
     {
         let resource = self.get()?;
         func(&resource);
@@ -120,7 +118,7 @@ impl ResourceRegistry {
     pub fn with_resource_mut<T, F>(&self, func: F) -> ResourceResult<()>
     where
         T: 'static,
-        F: FnOnce(&mut T) -> (),
+        F: FnOnce(&mut T),
     {
         let mut resource = self.get_mut::<T>()?;
         func(&mut resource);

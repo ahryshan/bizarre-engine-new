@@ -2,7 +2,7 @@ use crate::{
     entity::{entities::Entities, query::Query, query_data::QueryData},
     resource::{
         registry::{ResourceReadLock, ResourceRegistry, ResourceResult, ResourceWriteLock},
-        resource::IntoResource,
+        IntoResource,
     },
 };
 

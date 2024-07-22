@@ -1,4 +1,4 @@
-use std::{cell::Ref, marker::PhantomData, ops::Deref};
+use std::{cell::Ref, marker::PhantomData};
 
 use super::{component_storage::Component, query_element::QueryElement};
 

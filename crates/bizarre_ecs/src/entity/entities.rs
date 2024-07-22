@@ -4,7 +4,6 @@ use super::{
     component_result::{ComponentError, ComponentResult},
     component_storage::ComponentStorage,
     entity_builder::EntityBuilder,
-    query::Query,
     Entity,
 };
 
