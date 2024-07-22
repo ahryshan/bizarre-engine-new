@@ -1,120 +1,169 @@
-use std::{
-    any::TypeId,
-    marker::{PhantomData, PhantomPinned},
-};
+use std::{any::TypeId, marker::PhantomData};
 
-use super::{
-    component_storage::{Component, ComponentStorage},
-    query_iterator::QueryIterator,
-};
+use crate::world::World;
 
-pub trait QueryElement<'a, T> {
-    type LockType;
-    type Item;
-    type QEIterator;
+use super::{component_storage::Component, query_element::QueryElement};
 
-    fn new(component: &'a Component) -> Self;
-    fn get_lock(&self) -> Self::LockType;
-    fn transform_iter<I>(iter: I) -> Self::QEIterator
-    where
-        I: Iterator<Item = &'a Component> + Clone;
+pub struct Query<'q, D: QueryData<'q>> {
+    world: &'q World,
+    _phantom: PhantomData<D>,
 }
 
-pub trait QueryElementIterator<'a, E, T>
-where
-    E: QueryElement<'a, T>,
-{
-    fn from_iter(iter: impl Iterator<Item = &'a Component>) -> Self;
-}
-
-pub trait Query<'a, T, Inner, Iterators> {
-    fn type_ids() -> Vec<TypeId>;
-    fn combine_iters<I>(iters: Vec<I>) -> QueryIterator<'a, Iterators, T, Inner>
-    where
-        I: Iterator<Item = &'a Component> + Clone;
-}
-
-impl<'a, A, AA, AIter> Query<'a, A, AA, AIter> for A
-where
-    A: QueryElement<'a, AA, QEIterator = AIter>,
-    AA: 'static,
-    AIter: Iterator<Item = A>,
-{
-    fn type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<AA>()]
-    }
-
-    fn combine_iters<I>(iters: Vec<I>) -> QueryIterator<'a, AIter, A, AA>
-    where
-        I: Iterator<Item = &'a Component> + Clone,
-    {
-        let [iter_a] = iters.as_slice() else { panic!() };
-        let iters = A::transform_iter(iter_a.clone());
-        QueryIterator {
-            inner_iters: iters,
-            _phantom_inner: Default::default(),
-            _phantom_elements: Default::default(),
+impl<'q, D: QueryData<'q>> Query<'q, D> {
+    pub fn new(world: &'q World) -> Self {
+        Self {
+            world,
+            _phantom: Default::default(),
         }
     }
 }
 
-use paste::paste;
+impl<'q, D: QueryData<'q> + 'q> IntoIterator for Query<'q, D> {
+    type Item = D::Item;
 
-macro_rules! impl_query_inner {
-    ( $($fetch_t:ident),+;  $($inner_t:ident),+;  $($iter_t:ident),+) => {
-        impl<'a, $($fetch_t, $inner_t, $iter_t),+> Query<'a,($($fetch_t),+), ($($inner_t),+), ($($iter_t),+)> for ($($fetch_t),+)
-         where
-        $(
-            $fetch_t: QueryElement<'a, $inner_t, QEIterator = $iter_t>,
-            $inner_t: 'static,
-            $iter_t: Iterator<Item = $fetch_t>
-        ),+
-        {
-            fn type_ids() -> Vec<TypeId> {
-                vec![$(TypeId::of::<$inner_t>()),+]
-            }
+    type IntoIter = QueryIterator<'q, D, impl Iterator<Item = D::Item> + 'q>;
 
-            fn combine_iters<ComponentIter>(iters: Vec<ComponentIter>) -> QueryIterator<'a, ($($iter_t),+), ($($fetch_t),+), ($($inner_t),+)>
-            where
-                ComponentIter: Iterator<Item = &'a Component> + Clone,
-            {
-                let [$(paste!{[<iter_ $fetch_t:lower>]}),+] = iters.as_slice() else {
-                    panic!()
-                };
-                let iters = (
-                    $($fetch_t::transform_iter(
-                        paste!{[<iter_ $fetch_t:lower>].clone()}
-                    )),+
-                );
-                QueryIterator {
-                    inner_iters: iters,
-                    _phantom_inner: Default::default(),
-                    _phantom_elements: Default::default(),
+    fn into_iter(self) -> Self::IntoIter {
+        let bitmap = D::inner_type_ids().iter().fold(0, |acc, ti| {
+            acc | self.world.entities.comp_bitmasks.get(ti).unwrap()
+        });
+
+        let e_ids = self
+            .world
+            .entities
+            .entity_bitmasks
+            .iter()
+            .enumerate()
+            .filter_map(|(e_id, bm)| {
+                if *bm & bitmap == bitmap {
+                    Some(e_id)
+                } else {
+                    None
                 }
-            }
+            })
+            .collect::<Vec<_>>();
+
+        let storages = D::inner_type_ids()
+            .into_iter()
+            .map(move |tid| {
+                let storage = self.world.entities.components.get(&tid).unwrap();
+                let e_ids = e_ids.clone();
+                storage.iter().enumerate().filter_map(move |(index, c)| {
+                    if !e_ids.contains(&index) {
+                        return None;
+                    }
+
+                    Some(c.as_ref().unwrap().clone())
+                })
+            })
+            .collect();
+
+        D::iter(self.world, storages)
+    }
+}
+
+pub trait QueryData<'q> {
+    type Item;
+
+    fn inner_type_ids() -> Vec<TypeId>;
+    fn iter<I>(
+        world: &'q World,
+        iters: Vec<I>,
+    ) -> QueryIterator<'q, Self, impl Iterator<Item = Self::Item>>
+    where
+        Self: Sized,
+        I: Iterator<Item = Component> + Clone;
+}
+
+impl<'q, T> QueryData<'q> for T
+where
+    T: QueryElement,
+{
+    type Item = T;
+
+    fn inner_type_ids() -> Vec<TypeId> {
+        vec![T::inner_type_id()]
+    }
+
+    fn iter<I>(
+        world: &'q World,
+        iters: Vec<I>,
+    ) -> QueryIterator<'q, Self, impl Iterator<Item = Self>>
+    where
+        Self: Sized,
+        I: Iterator<Item = Component> + Clone,
+    {
+        let [ref iter] = iters[0..1] else {
+            panic!("Trying to build a QueryIterator from data with insufficient number of members");
+        };
+
+        let iter = iter.clone().map(T::from_component);
+
+        QueryIterator {
+            world,
+            iter,
+            _phantom: Default::default(),
         }
     }
 }
 
-macro_rules! impl_query {
-    (
-        $f_head:tt, $($f_tail:tt),+;
-        $in_head:tt, $($in_tail:tt),+;
-        $it_head:tt, $($it_tail:tt),+
-    ) => {
-        impl_query_inner!(
-            $f_head, $($f_tail),+;
-            $in_head, $($in_tail),+;
-            $it_head, $($it_tail),+
-        );
-        impl_query!($($f_tail),+; $($in_tail),+; $($it_tail),+);
-    };
-    ($f_head:tt; $in_head:tt; $it_head:tt) => {
-    };
+impl<'q, A, B> QueryData<'q> for (A, B)
+where
+    A: QueryElement,
+    B: QueryElement,
+{
+    type Item = (A, B);
+
+    fn inner_type_ids() -> Vec<TypeId> {
+        vec![A::inner_type_id(), B::inner_type_id()]
+    }
+
+    fn iter<I>(
+        world: &'q World,
+        iters: Vec<I>,
+    ) -> QueryIterator<'q, Self, impl Iterator<Item = Self::Item>>
+    where
+        I: Iterator<Item = Component> + Clone,
+    {
+        let [ref iter_a, ref iter_b, ..] = iters[..] else {
+            panic!("Trying to build a QueryIterator from data with insufficient number of members");
+        };
+
+        let mut iter_a = iter_a.clone();
+        let mut iter_b = iter_b.clone();
+
+        let count = iter_a.clone().count();
+
+        let iter = (0..count).filter_map(move |_| {
+            let items = (iter_a.next(), iter_b.next());
+            if let (Some(item_a), Some(item_b)) = items {
+                Some((A::from_component(item_a), B::from_component(item_b)))
+            } else {
+                None
+            }
+        });
+
+        QueryIterator::<Self, _> {
+            world,
+            iter,
+            _phantom: Default::default(),
+        }
+    }
 }
 
-impl_query!(
-    A,B,C,D,E,F,G,H,I,J,K,L,M;
-    AA,BB,CC,DD,EE,FF,GG,HH,II,JJ,KK,LL,MM;
-    AIter,BIter,CIter,DIter,EIter,FIter,GIter,HIter,IIter,JIter,KIter,LIter,MIter
-);
+pub struct QueryIterator<'q, D: QueryData<'q>, I> {
+    world: &'q World,
+    iter: I,
+    _phantom: PhantomData<&'q D>,
+}
+
+impl<'q, D: QueryData<'q>, I> Iterator for QueryIterator<'q, D, I>
+where
+    I: Iterator<Item = D::Item>,
+{
+    type Item = D::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}

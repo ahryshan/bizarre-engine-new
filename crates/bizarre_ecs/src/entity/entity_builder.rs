@@ -11,7 +11,7 @@ impl EntityBuilder<'_> {
         T: 'static,
     {
         self.entities.register_component::<T>();
-        self.entities.insert_component(self.entity, component);
+        let _ = self.entities.insert_component(self.entity, component);
         self
     }
 

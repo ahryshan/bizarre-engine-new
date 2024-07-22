@@ -1,8 +1,11 @@
 use std::{any::TypeId, cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::{
-    component_storage::ComponentStorage, entity_builder::EntityBuilder, query::Query,
-    query_iterator::QueryIterator, Entity,
+    component_result::{ComponentError, ComponentResult},
+    component_storage::ComponentStorage,
+    entity_builder::EntityBuilder,
+    query::Query,
+    Entity,
 };
 
 #[derive(Default)]
@@ -44,14 +47,19 @@ impl Entities {
         self.comp_bitmasks.insert(k, 2 << self.comp_bitmasks.len());
     }
 
-    pub fn insert_component<T>(&mut self, entity: Entity, component: T)
+    pub fn insert_component<T>(&mut self, entity: Entity, component: T) -> ComponentResult<()>
     where
         T: 'static,
     {
-        let storage = self.components.get_mut(&TypeId::of::<T>()).unwrap();
+        let storage = self
+            .components
+            .get_mut(&TypeId::of::<T>())
+            .ok_or(ComponentError::not_registered::<T>())?;
 
         let _ = storage[entity.id()].insert(Rc::new(RefCell::new(component)));
-        self.entity_bitmasks[entity.id().as_usize()] |= self.component_bitmask::<T>();
+        self.entity_bitmasks[entity.id().as_usize()] |= self.component_bitmask::<T>()?;
+
+        Ok(())
     }
 
     pub fn get_storage<T>(&self) -> &ComponentStorage
@@ -71,54 +79,14 @@ impl Entities {
         }
     }
 
-    pub fn component_bitmask<T>(&self) -> u128
+    pub fn component_bitmask<T>(&self) -> ComponentResult<u128>
     where
         T: 'static,
     {
-        *self.comp_bitmasks.get(&TypeId::of::<T>()).unwrap()
-    }
-
-    pub fn query_iter<'a, T, InnerT, IterT, Q>(&'a mut self) -> QueryIterator<'a, IterT, T, InnerT>
-    where
-        Q: Query<'a, T, InnerT, IterT>,
-    {
-        let type_ids = Q::type_ids();
-        let bitmask = type_ids
-            .iter()
-            .fold(0u128, |acc, ti| acc | self.comp_bitmasks.get(ti).unwrap());
-
-        let eid = self
-            .entity_bitmasks
-            .iter()
-            .enumerate()
-            .filter_map(|(eid, ent_map)| {
-                if ent_map & bitmask == bitmask {
-                    Some(eid)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let storages = type_ids
-            .iter()
-            .map(|id| {
-                self.components
-                    .get(id)
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, component)| {
-                        if !eid.contains(&i) {
-                            return None;
-                        } else {
-                            Some(component.as_ref().unwrap())
-                        }
-                    })
-            })
-            .collect::<Vec<_>>();
-
-        Q::combine_iters(storages)
+        self.comp_bitmasks
+            .get(&TypeId::of::<T>())
+            .copied()
+            .ok_or(ComponentError::not_registered::<T>())
     }
 }
 
@@ -126,12 +94,7 @@ impl Entities {
 mod tests {
     use std::any::TypeId;
 
-    use crate::entity::{
-        component_storage::ComponentStorage,
-        fetch::{Fetch, FetchIterator},
-        query::Query,
-        EntityGen, EntityId,
-    };
+    use crate::entity::{component_storage::ComponentStorage, EntityGen, EntityId};
 
     use super::Entities;
 
@@ -235,21 +198,5 @@ mod tests {
                 map_storage(acceleration_storage)
             )
         }
-    }
-
-    #[test]
-    fn should_run_query() {
-        let mut entities = Entities::new();
-        let entity = entities
-            .spawn()
-            .with_component(Health(100))
-            .with_component(Velocity(100.0));
-
-        type QElements<'a> = (Fetch<'a, Health>, Fetch<'a, Velocity>);
-        type Inner = (Health, Velocity);
-        type Iters<'a> = (FetchIterator<'a, Health>, FetchIterator<'a, Velocity>);
-        type Query<'a> = (Fetch<'a, Health>, Fetch<'a, Velocity>);
-
-        let q_iter = entities.query_iter::<QElements, Inner, Iters, Query>();
     }
 }

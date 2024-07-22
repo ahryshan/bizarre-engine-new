@@ -5,15 +5,15 @@ use std::{
     rc::Rc,
 };
 
-use super::{query::Query, query_iterator::QueryIterator, EntityId};
+use thiserror::Error;
+
+use super::EntityId;
 
 pub type Component = Rc<RefCell<dyn Any>>;
 
 pub struct ComponentStorage {
     inner: Vec<Option<Component>>,
 }
-
-impl ComponentStorage {}
 
 impl From<Vec<Option<Component>>> for ComponentStorage {
     fn from(value: Vec<Option<Component>>) -> Self {

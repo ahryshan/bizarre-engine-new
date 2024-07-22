@@ -1,10 +1,11 @@
+pub mod component_result;
 pub mod component_storage;
 pub mod entities;
 pub mod entity_builder;
 pub mod fetch;
+pub mod fetch_mut;
 pub mod query;
-pub mod query_iterator;
-pub mod query_old;
+pub mod query_element;
 
 use std::ops::{Add, AddAssign};
 
