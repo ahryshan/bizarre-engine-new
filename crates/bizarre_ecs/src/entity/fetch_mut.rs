@@ -13,6 +13,7 @@ where
 {
     type Item = T;
     type LockType<'b> = RefMut<'b, T> where Self: 'b;
+    type RefType<'a> = &'a mut T where Self: 'a;
 
     fn get_lock(&self) -> Self::LockType<'_> {
         let r = RefMut::map(self.component.borrow_mut(), |r| r.downcast_mut().unwrap());

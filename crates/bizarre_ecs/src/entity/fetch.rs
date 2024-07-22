@@ -13,6 +13,7 @@ where
 {
     type Item = T;
     type LockType<'a> = Ref<'a, T>;
+    type RefType<'a> = &'a T;
 
     fn get_lock(&self) -> Self::LockType<'_> {
         let r = Ref::map(self.component.borrow(), |r| r.downcast_ref().unwrap());

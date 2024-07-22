@@ -1,12 +1,12 @@
 use std::any::TypeId;
 
-
 use super::{
     component_storage::Component, query_element::QueryElement, query_iterator::QueryIterator,
 };
 
 pub trait QueryData<'q> {
     type Item;
+    type LockedItem;
 
     fn inner_type_ids() -> Vec<TypeId>;
     fn iter<I>(iters: Vec<I>) -> QueryIterator<'q, Self, impl Iterator<Item = Self::Item>>
@@ -17,9 +17,10 @@ pub trait QueryData<'q> {
 
 impl<'q, T> QueryData<'q> for T
 where
-    T: QueryElement,
+    T: QueryElement + 'q,
 {
     type Item = T;
+    type LockedItem = T::LockType<'q>;
 
     fn inner_type_ids() -> Vec<TypeId> {
         vec![T::inner_type_id()]
@@ -45,10 +46,11 @@ where
 
 impl<'q, A, B> QueryData<'q> for (A, B)
 where
-    A: QueryElement,
-    B: QueryElement,
+    A: QueryElement + 'q,
+    B: QueryElement + 'q,
 {
     type Item = (A, B);
+    type LockedItem = (A::LockType<'q>, B::LockType<'q>);
 
     fn inner_type_ids() -> Vec<TypeId> {
         vec![A::inner_type_id(), B::inner_type_id()]

@@ -7,6 +7,9 @@ pub trait QueryElement {
     type LockType<'a>
     where
         Self: 'a;
+    type RefType<'a>
+    where
+        Self: 'a;
 
     fn inner_type_id() -> TypeId {
         TypeId::of::<Self::Item>()
