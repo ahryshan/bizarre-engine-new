@@ -21,6 +21,10 @@ where
     fn get_item(world: &'q World, _: Entity) -> Self::Item {
         world.resources.get::<T>().unwrap()
     }
+
+    fn is_non_component() -> bool {
+        true
+    }
 }
 
 pub struct ResMut<'q, T>(PhantomData<&'q T>)
@@ -39,5 +43,9 @@ where
 
     fn get_item(world: &'q World, _: Entity) -> Self::Item {
         world.resources.get_mut::<T>().unwrap()
+    }
+
+    fn is_non_component() -> bool {
+        true
     }
 }

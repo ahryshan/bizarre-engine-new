@@ -34,6 +34,8 @@ fn main() {
 
     world.add_system(PrintResource, "print_resource").unwrap();
 
+    world.run_systems();
+
     let removed_res = world.remove_resource::<NamedRes>().unwrap();
 }
 

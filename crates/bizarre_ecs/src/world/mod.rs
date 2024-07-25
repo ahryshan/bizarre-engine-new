@@ -82,6 +82,10 @@ impl World {
         self.systems.push(StoredSystem::from_system(system));
         Ok(())
     }
+
+    pub fn run_systems(&mut self) {
+        self.systems.iter().for_each(|s| s.run(self));
+    }
 }
 
 #[cfg(test)]

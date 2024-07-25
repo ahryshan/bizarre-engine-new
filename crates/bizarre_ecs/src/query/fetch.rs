@@ -21,6 +21,10 @@ where
     fn get_item(world: &'q World, entity: Entity) -> Self::Item {
         world.components.get::<T>(entity).unwrap()
     }
+
+    fn is_non_component() -> bool {
+        false
+    }
 }
 
 pub struct FetchMut<'q, T>(PhantomData<&'q T>)
@@ -39,5 +43,9 @@ where
 
     fn get_item(world: &'q World, entity: Entity) -> Self::Item {
         world.components.get_mut::<T>(entity).unwrap()
+    }
+
+    fn is_non_component() -> bool {
+        false
     }
 }

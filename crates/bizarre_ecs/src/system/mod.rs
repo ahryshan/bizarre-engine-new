@@ -29,17 +29,17 @@ pub struct StoredSystem {
 }
 
 impl StoredSystem {
-    pub fn init(&mut self, world: &mut World) {
+    pub fn init(&self, world: &mut World) {
         let cell = unsafe { UnsafeWorldCell::new(world) };
         (self.init_fn)(self.state, cell);
     }
 
-    pub fn run(&mut self, world: &World) {
+    pub fn run(&self, world: &World) {
         let cell = unsafe { UnsafeWorldCell::new(world) };
         (self.run_fn)(self.state, cell)
     }
 
-    pub fn dispose(&mut self, world: &mut World) {
+    pub fn dispose(&self, world: &mut World) {
         let cell = unsafe { UnsafeWorldCell::new(world) };
         (self.dispose_fn)(self.state, cell)
     }

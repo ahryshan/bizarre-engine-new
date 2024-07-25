@@ -8,6 +8,7 @@ pub trait QueryData<'q> {
     type Item;
 
     fn inner_type_ids() -> Vec<TypeId>;
+    fn is_non_component() -> bool;
     fn get_item(world: &'q World, entity: Entity) -> Self::Item;
 }
 
@@ -30,6 +31,10 @@ macro_rules! impl_data {
             fn get_item(world: &'q World, entity: Entity) -> Self::Item {
                 ($head::get_item(world, entity), $($tail::get_item(world, entity)),+)
             }
+
+            fn is_non_component() -> bool {
+                [$head::is_non_component(), $($tail::is_non_component()),+].iter().fold(true, |acc, curr| acc && *curr)
+            }
         }
 
         impl_data!($($tail),+);
@@ -51,6 +56,10 @@ macro_rules! impl_data {
 
             fn get_item(world: &'q World, entity: Entity) -> Self::Item {
                 $head::get_item(world, entity)
+            }
+
+            fn is_non_component() -> bool {
+                $head::is_non_component()
             }
         }
     };

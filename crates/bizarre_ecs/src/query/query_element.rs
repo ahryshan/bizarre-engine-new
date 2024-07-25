@@ -10,5 +10,6 @@ pub trait QueryElement<'q> {
     /// Must return None if `QueryElement` does not fetch a
     /// [`Component`][crate::component::Component] from [`World`]
     fn inner_type_id() -> Option<TypeId>;
+    fn is_non_component() -> bool;
     fn get_item(world: &'q World, entity: Entity) -> Self::Item;
 }

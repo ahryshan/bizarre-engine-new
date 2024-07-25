@@ -65,4 +65,9 @@ impl<'q> QueryElement<'q> for Entity {
         let _ = world;
         entity
     }
+
+    fn is_non_component() -> bool {
+        // False, because entity query is dependant on queried components
+        false
+    }
 }

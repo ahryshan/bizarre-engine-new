@@ -11,6 +11,7 @@ where
     world: &'q World,
     entities: Vec<Entity>,
     index: usize,
+    yielded_non_component: bool,
     _phantom: PhantomData<&'q T>,
 }
 
@@ -23,6 +24,7 @@ where
             world,
             entities,
             index: 0,
+            yielded_non_component: false,
             _phantom: PhantomData,
         }
     }
@@ -35,6 +37,14 @@ where
     type Item = D::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if D::is_non_component() {
+            if !self.yielded_non_component {
+                return Some(D::get_item(self.world, Entity::from_gen_id(0, 0)));
+            } else {
+                return None;
+            }
+        }
+
         if self.index >= self.entities.len() {
             return None;
         }
