@@ -1,150 +1,122 @@
-pub mod registry;
-
 use std::{
-    any::{type_name, TypeId},
-    ops::{Deref, DerefMut},
-    sync::RwLock,
+    any::TypeId,
+    collections::{btree_map, BTreeMap},
 };
 
-use thiserror::Error;
+use error::{ResourceError, ResourceResult};
 
-pub struct Resource {
-    data: RwLock<ResourceData>,
+use crate::component::component_storage::{IntoStoredComponent, Storable, StoredComponent};
+
+pub mod error;
+
+#[derive(Default)]
+pub struct Resources {
+    map: BTreeMap<TypeId, StoredComponent>,
 }
 
-impl Resource {
-    pub fn into_inner<T>(self) -> T
-    where
-        T: 'static,
-    {
-        self.data.into_inner().unwrap().into_inner()
-    }
-}
+/// A marker trait that must be implemented for all types used as resources
+pub trait Resource: Storable {}
 
-impl Deref for Resource {
-    type Target = RwLock<ResourceData>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl DerefMut for Resource {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
-    }
-}
-
-#[derive(Debug)]
-pub struct ResourceData {
-    type_id: TypeId,
-    data: *mut (),
-    type_name: &'static str,
-}
-
-#[derive(Error, Debug)]
-pub enum ResourceError {
-    #[error(r#"Cannot convert RegisteredResource of type "{expected}" to "{found}""#)]
-    CannotConvert {
-        expected: &'static str,
-        found: &'static str,
-    },
-
-    #[error(r#"Resource "{type_name}" is already present in this registry"#)]
-    AlreadyPresent { type_name: &'static str },
-
-    #[error(r#"Resource "{type_name}" is not present in this registry"#)]
-    NotPresent { type_name: &'static str },
-}
-
-impl ResourceError {
-    pub fn cannot_convert<T>(resource: &ResourceData) -> ResourceError {
-        Self::CannotConvert {
-            expected: resource.type_name,
-            found: type_name::<T>(),
-        }
+impl Resources {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn already_present<T>() -> ResourceError {
-        Self::AlreadyPresent {
-            type_name: type_name::<T>(),
-        }
-    }
+    pub fn insert<R: IntoStoredComponent + Resource>(&mut self, resource: R) -> ResourceResult {
+        let resource = resource.into_stored_component();
 
-    pub fn not_present<T>() -> ResourceError {
-        Self::NotPresent {
-            type_name: type_name::<T>(),
-        }
-    }
-}
-
-impl ResourceData {
-    pub fn as_ref<T>(&self) -> Result<&T, ResourceError>
-    where
-        T: 'static,
-    {
-        let type_id = TypeId::of::<T>();
-
-        if type_id != self.type_id {
-            Err(ResourceError::cannot_convert::<T>(self))
+        if let btree_map::Entry::Vacant(e) = self.map.entry(resource.inner_type_id()) {
+            e.insert(resource);
+            Ok(())
         } else {
-            let obj = unsafe { &*(self.data as *const T) };
-            Ok(obj)
+            Err(ResourceError::AlreadyPresent(resource.component_name()))
         }
     }
 
-    pub fn as_mut<T>(&mut self) -> Result<&mut T, ResourceError>
-    where
-        T: 'static,
-    {
-        let type_id = TypeId::of::<T>();
-
-        if type_id != self.type_id {
-            Err(ResourceError::cannot_convert::<T>(self))
-        } else {
-            let obj = unsafe { &mut *(self.data as *mut T) };
-            Ok(obj)
+    pub fn get<R: Resource>(&self) -> ResourceResult<&R> {
+        match self.map.get(&R::inner_type_id()) {
+            Some(r) => Ok(r.downcast_ref().unwrap()),
+            None => Err(ResourceError::NotPresent(R::inner_type_name())),
         }
     }
 
-    pub fn into_inner<T>(self) -> T
-    where
-        T: 'static,
-    {
-        let type_id = TypeId::of::<T>();
-
-        if type_id != self.type_id {
-            panic!("Trying to consume RegisteredResource and convert it into inner, but the type is wrong");
+    pub fn get_mut<R: Resource>(&self) -> ResourceResult<&mut R> {
+        match self.map.get(&R::inner_type_id()) {
+            Some(r) => Ok(r.downcast_mut().unwrap()),
+            None => Err(ResourceError::NotPresent(R::inner_type_name())),
         }
+    }
 
-        let obj: T = unsafe { *Box::from_raw(self.data as *mut T) };
-        obj
+    pub fn remove<R: Resource>(&mut self) -> Option<R> {
+        self.map
+            .remove(&R::inner_type_id())
+            .map(|r| unsafe { r.into_inner() })
     }
 }
 
-pub trait IntoResource {
-    fn into_resource(self) -> Resource;
-}
+#[cfg(test)]
+mod tests {
+    use anyhow::{anyhow, Result};
 
-impl<T> IntoResource for T
-where
-    T: 'static + Send + Sync + Sized,
-{
-    fn into_resource(self) -> Resource {
-        let data = {
-            let boxed = Box::new(self);
-            Box::into_raw(boxed) as *mut ()
-        };
-        let type_id = TypeId::of::<Self>();
-        let type_name = type_name::<Self>();
+    use crate::test_commons::Motd;
 
-        let res = ResourceData {
-            data,
-            type_id,
-            type_name,
-        };
-        Resource {
-            data: RwLock::new(res),
+    use super::{error::ResourceError, Resources};
+
+    #[test]
+    fn should_insert_resource() -> Result<()> {
+        let mut storage = Resources::new();
+
+        storage.insert(Motd("Hello, World!"))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn should_err_on_double_insert() -> Result<()> {
+        let mut storage = Resources::new();
+
+        storage.insert(Motd("Hello, World!"))?;
+        match storage.insert(Motd("Hello, World!")) {
+            Err(ResourceError::AlreadyPresent(_)) => Ok(()),
+            _ => Err(anyhow!(
+                "Expected resource storage to prevent double insert"
+            )),
         }
+    }
+
+    #[test]
+    fn should_get_resource() -> Result<()> {
+        let mut storage = Resources::new();
+        storage.insert(Motd("Hello, World!"))?;
+
+        let health = storage.get::<Motd>()?;
+
+        assert!(health == &Motd("Hello, World!"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn should_get_resource_mut() -> Result<()> {
+        let mut r = Resources::new();
+        r.insert(Motd("hello world"))?;
+
+        let motd = r.get_mut::<Motd>()?;
+
+        motd.0 = "Hello, World!";
+        let cloned = motd.clone();
+
+        let health = r.get::<Motd>()?;
+
+        assert!(health == &cloned);
+
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic]
+    fn should_not_get_nonexistent_resource() {
+        let r = Resources::new();
+        r.get::<Motd>().unwrap();
     }
 }

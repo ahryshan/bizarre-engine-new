@@ -1,29 +1,43 @@
-use bizarre_engine::ecs::world::World;
+use bizarre_engine::ecs::{
+    query::{res::Res, Query},
+    world::World,
+    Resource, System,
+};
 
 #[derive(Debug)]
-pub struct Res {
+pub struct NamedRes {
     name: &'static str,
 }
 
-fn print_res(res: &Res) {
+impl Resource for NamedRes {}
+
+struct PrintResource;
+
+impl System for PrintResource {
+    type QueryData<'q> = Res<'q, NamedRes>;
+
+    fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>) {
+        let resource = query.into_iter().next().unwrap();
+        println!("{resource:?}")
+    }
+}
+
+fn print_res(res: &NamedRes) {
     dbg!(res);
 }
 
 fn main() {
     let mut world = World::default();
 
-    let res = Res { name: "John" };
+    let res = NamedRes { name: "John" };
     world.insert_resource(res).unwrap();
 
-    world.with_resource(print_res).unwrap();
-    let _ = world.with_resource_mut(|res: &mut Res| res.name = "George");
-    let _ = world.with_resource(print_res);
+    world.add_system(PrintResource, "print_resource").unwrap();
 
-    let removed_res = world.remove_resource::<Res>().unwrap();
-    dbg!(removed_res);
+    let removed_res = world.remove_resource::<NamedRes>().unwrap();
 }
 
-impl Drop for Res {
+impl Drop for NamedRes {
     fn drop(&mut self) {
         println!("{} was dropped", self.name);
     }

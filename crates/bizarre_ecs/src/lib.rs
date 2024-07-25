@@ -1,9 +1,20 @@
-#![feature(error_generic_member_access)]
-#![feature(trait_upcasting)]
-#![feature(mapped_lock_guards)]
+#![feature(auto_traits)]
+#![feature(negative_impls)]
+#![feature(trait_alias)]
 #![feature(marker_trait_attr)]
-#![feature(impl_trait_in_assoc_type)]
 
+pub mod component;
 pub mod entity;
+pub mod query;
 pub mod resource;
+pub mod system;
 pub mod world;
+
+#[cfg(test)]
+mod test_commons;
+
+pub use component::Component;
+pub use entity::Entity;
+pub use resource::Resource;
+pub use system::System;
+pub use world::World;

@@ -1,127 +1,68 @@
-pub mod component_result;
-pub mod component_storage;
+use std::fmt::Debug;
+
+use crate::query::query_element::QueryElement;
+
+pub mod builder;
 pub mod entities;
-pub mod entity_builder;
-pub mod fetch;
-pub mod fetch_mut;
-pub mod query;
-pub mod query_data;
-pub mod query_element;
-pub mod query_iterator;
+pub mod error;
 
-use std::ops::{Add, AddAssign};
-
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Hash, Clone, Copy)]
 pub struct Entity {
-    /// [--gen(8b)--][---id(sizeof(usize)-8b)----]
-    inner: usize,
+    ///|gen|id |
+    ///|---|---|
+    ///|16b|48b|
+    inner: u64,
 }
 
 impl Entity {
-    pub const GEN_SHIFT: usize = usize::BITS as usize - 8;
+    const GEN_SHIFT: usize = 64 - 16;
 
-    pub fn new(id: usize, gen: u8) -> Entity {
-        Self {
-            inner: id + ((gen as usize) << Self::GEN_SHIFT),
-        }
+    /// Constructs an `Entity` from generation and id.
+    /// *NOTE*: an entity with generation 0 is a a special value, which is used in multiple places
+    /// to note an entity that is not being considered. So the youngest valid entity is an entity
+    /// with gen = 1 and id = 0
+    pub const fn from_gen_id(gen: u16, id: u64) -> Self {
+        let gen = (gen as u64) << Self::GEN_SHIFT;
+        Self { inner: id + gen }
     }
 
-    pub fn id(&self) -> EntityId {
-        EntityId(self.inner << 8 >> 8)
+    pub fn id(&self) -> u64 {
+        self.inner << Self::GEN_SHIFT >> Self::GEN_SHIFT
     }
 
-    pub fn gen(&self) -> EntityGen {
-        EntityGen(self.inner >> Self::GEN_SHIFT << Self::GEN_SHIFT)
+    pub fn index(&self) -> usize {
+        self.id() as usize
     }
-}
 
-impl Add<EntityGen> for Entity {
-    type Output = Entity;
-
-    fn add(mut self, rhs: EntityGen) -> Self::Output {
-        self.inner += rhs.0;
-        self
+    pub fn gen(&self) -> u16 {
+        (self.inner >> Self::GEN_SHIFT).try_into().unwrap()
     }
-}
 
-impl AddAssign<EntityGen> for Entity {
-    fn add_assign(&mut self, rhs: EntityGen) {
-        *self = *self + rhs;
+    pub fn set_gen(&mut self, gen: u16) {
+        self.clear_gen();
+        self.inner += (gen as u64) << Self::GEN_SHIFT
     }
-}
 
-#[derive(Clone, Copy, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EntityId(usize);
-
-#[derive(Clone, Copy, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EntityGen(usize);
-
-impl From<usize> for EntityId {
-    fn from(value: usize) -> Self {
-        Self(value)
+    pub(crate) fn clear_gen(&mut self) {
+        self.inner = self.inner << 16 >> 16;
     }
 }
 
-impl From<EntityId> for usize {
-    fn from(value: EntityId) -> Self {
-        value.0
+impl Debug for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Entity(id: {}, gen: {})", self.id(), self.gen())
     }
 }
 
-impl EntityId {
-    pub const MAX: usize = usize::MAX << 8 >> 8;
+impl<'q> QueryElement<'q> for Entity {
+    type Item = Entity;
 
-    pub fn as_usize(&self) -> usize {
-        (*self).into()
-    }
-}
-
-impl From<u8> for EntityGen {
-    fn from(value: u8) -> Self {
-        Self((value as usize) << Entity::GEN_SHIFT)
-    }
-}
-
-impl From<EntityGen> for u8 {
-    fn from(value: EntityGen) -> Self {
-        (value.0 >> Entity::GEN_SHIFT).try_into().unwrap()
-    }
-}
-
-impl EntityGen {
-    pub const MAX: u8 = u8::MAX;
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::entity::{EntityGen, EntityId};
-
-    use super::Entity;
-
-    #[test]
-    fn should_create_entity() {
-        let entity = Entity::new(1, 0);
-        assert!(entity.id().0 == 1);
-        assert!(u8::from(entity.gen()) == 0);
-
-        let entity = Entity::new(EntityId::MAX, EntityGen::MAX);
-        assert!(entity.id().0 == EntityId::MAX);
-        assert!(
-            <EntityGen as Into<u8>>::into(entity.gen()) == EntityGen::MAX,
-            "Entity's generation is not what expected, expected: {}, found: {}",
-            EntityGen::MAX,
-            <EntityGen as Into<u8>>::into(entity.gen())
-        );
+    fn inner_type_id() -> Option<std::any::TypeId> {
+        None
     }
 
-    #[test]
-    fn should_add_generation() {
-        let entity = Entity::new(1, 0);
-        let mut entity = entity + EntityGen::from(25);
-        assert!(entity.gen() == EntityGen::from(25));
-
-        entity += EntityGen::from(33);
-        assert!(entity.gen() == EntityGen::from(58));
+    fn get_item(world: &'q crate::world::World, entity: Entity) -> Self::Item {
+        let _ = world;
+        entity
     }
 }
