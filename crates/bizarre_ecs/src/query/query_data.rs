@@ -12,6 +12,20 @@ pub trait QueryData<'q> {
     fn get_item(world: &'q World, entity: Entity) -> Self::Item;
 }
 
+impl<'q> QueryData<'q> for () {
+    type Item = ();
+
+    fn inner_type_ids() -> Vec<TypeId> {
+        vec![]
+    }
+
+    fn is_non_component() -> bool {
+        true
+    }
+
+    fn get_item(world: &'q World, entity: Entity) -> Self::Item {}
+}
+
 macro_rules! impl_data {
     ($head:tt, $($tail:tt),+) => {
         impl<'q, $head, $($tail),+> QueryData<'q> for ($head, $($tail),+)

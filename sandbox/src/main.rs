@@ -1,42 +1,74 @@
+use anyhow::Result;
 use bizarre_engine::ecs::{
-    query::{res::Res, Query},
+    query::{fetch::Fetch, res::Res, Query},
+    system::schedule::Schedule,
     world::World,
-    Resource, System,
+    Component, Resource, System,
 };
 
-#[derive(Debug)]
-pub struct NamedRes {
-    name: &'static str,
-}
+pub struct NameComponent(&'static str);
 
-impl Resource for NamedRes {}
+impl Component for NameComponent {}
 
-struct PrintRes;
+pub struct GreetEntity;
 
-impl System for PrintRes {
-    type QueryData<'q> = Res<'q, NamedRes>;
+impl System for GreetEntity {
+    type QueryData<'q> = Fetch<'q, NameComponent>;
 
     fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>) {
-        let res = query.into_iter().next().unwrap();
-        println!("{res:?}")
+        for name in query {
+            println!("Hello, {}", name.0);
+        }
     }
 }
 
-fn main() {
+pub struct GreetEntityAgain;
+
+impl System for GreetEntityAgain {
+    type QueryData<'q> = Fetch<'q, NameComponent>;
+
+    fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>) {
+        for name in query {
+            println!("Hello again, {}", name.0);
+        }
+    }
+}
+
+pub struct GreetWorld;
+
+impl System for GreetWorld {
+    type QueryData<'q> = ();
+
+    fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>) {
+        println!("Hello World!");
+    }
+}
+
+fn main() -> Result<()> {
     let mut world = World::default();
 
-    let res = NamedRes { name: "John" };
-    world.insert_resource(res).unwrap();
+    world.spawn().with_component(NameComponent("John"));
+    world.spawn().with_component(NameComponent("Don"));
+    world.spawn().with_component(NameComponent("Dog"));
+    world.spawn().with_component(NameComponent("Meat"));
 
-    world.add_system(PrintRes, "print_resource").unwrap();
+    world.add_system(Schedule::Frame, GreetWorld, "greet_world")?;
 
-    world.run_systems();
+    world.add_system_with_dependencies(
+        Schedule::Frame,
+        GreetEntity,
+        "greet_entity",
+        &["greet_world"],
+    )?;
 
-    let removed_res = world.remove_resource::<NamedRes>().unwrap();
-}
+    world.add_system_with_dependencies(
+        Schedule::Frame,
+        GreetEntityAgain,
+        "greet_entity_again",
+        &["greet_world", "greet_entity"],
+    )?;
 
-impl Drop for NamedRes {
-    fn drop(&mut self) {
-        println!("{} was dropped", self.name);
-    }
+    world.run_schedule(Schedule::Frame);
+
+    Ok(())
 }

@@ -6,7 +6,9 @@ members = [
     "crates/bizarre_window",
     "crates/bizarre_event",
     "crates/bizarre_engine",
-    "crates/bizarre_core", "crates/bizarre_ecs",
+    "crates/bizarre_core",
+    "crates/bizarre_ecs",
+    "crates/bizarre_memory",
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 

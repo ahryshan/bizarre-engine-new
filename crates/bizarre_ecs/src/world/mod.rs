@@ -3,7 +3,11 @@ use crate::{
     entity::{builder::EntityBuilder, entities::Entities, error::EntityResult, Entity},
     query::{query_data::QueryData, Query},
     resource::{error::ResourceResult, Resource, Resources},
-    system::{error::SystemResult, IntoStoredSystem, StoredSystem},
+    system::{
+        error::SystemResult,
+        schedule::{Schedule, Schedules},
+        IntoStoredSystem,
+    },
 };
 
 pub mod world_unsafe_cell;
@@ -13,7 +17,7 @@ pub struct World {
     pub(crate) entities: Entities,
     pub(crate) components: Components,
     pub(crate) resources: Resources,
-    pub(crate) systems: Vec<StoredSystem>,
+    pub(crate) schedules: Schedules,
 }
 
 impl World {
@@ -79,16 +83,26 @@ impl World {
 
     pub fn add_system(
         &mut self,
+        schedule: Schedule,
         system: impl IntoStoredSystem,
-        name: impl Into<Box<str>>,
+        name: &'static str,
     ) -> SystemResult {
-        let _ = name;
-        self.systems.push(system.into_stored_system());
-        Ok(())
+        self.add_system_with_dependencies(schedule, system, name, &[])
     }
 
-    pub fn run_systems(&mut self) {
-        self.systems.iter().for_each(|s| s.run(self));
+    pub fn add_system_with_dependencies(
+        &mut self,
+        schedule: Schedule,
+        system: impl IntoStoredSystem,
+        name: &'static str,
+        dependencies: &[&'static str],
+    ) -> SystemResult {
+        self.schedules
+            .add_system(schedule, name, dependencies, system)
+    }
+
+    pub fn run_schedule(&self, schedule: Schedule) -> SystemResult {
+        self.schedules.run(schedule, self)
     }
 }
 

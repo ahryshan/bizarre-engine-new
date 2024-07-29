@@ -4,9 +4,11 @@ use crate::{
 };
 
 pub mod error;
+pub mod schedule;
+pub mod system_graph;
 
 pub trait System {
-    type QueryData<'q>: QueryData<'q>;
+    type QueryData<'q>: QueryData<'q> = ();
 
     fn init(&mut self, world: &mut World) {
         let _ = world;
@@ -40,7 +42,7 @@ pub struct StoredSystem {
 }
 
 impl StoredSystem {
-    pub fn init(&self, world: &mut World) {
+    pub fn init(&self, world: &World) {
         if let Some(func) = &self.init_fn {
             let cell = unsafe { UnsafeWorldCell::new(world) };
             (func)(self.state, cell)
