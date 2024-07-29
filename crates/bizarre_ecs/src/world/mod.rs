@@ -3,7 +3,7 @@ use crate::{
     entity::{builder::EntityBuilder, entities::Entities, error::EntityResult, Entity},
     query::{query_data::QueryData, Query},
     resource::{error::ResourceResult, Resource, Resources},
-    system::{error::SystemResult, StoredSystem, System},
+    system::{error::SystemResult, IntoStoredSystem, StoredSystem},
 };
 
 pub mod world_unsafe_cell;
@@ -77,9 +77,13 @@ impl World {
         Query::new(self)
     }
 
-    pub fn add_system(&mut self, system: impl System, name: impl Into<Box<str>>) -> SystemResult {
+    pub fn add_system(
+        &mut self,
+        system: impl IntoStoredSystem,
+        name: impl Into<Box<str>>,
+    ) -> SystemResult {
         let _ = name;
-        self.systems.push(StoredSystem::from_system(system));
+        self.systems.push(system.into_stored_system());
         Ok(())
     }
 

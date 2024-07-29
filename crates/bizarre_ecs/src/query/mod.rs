@@ -25,7 +25,10 @@ impl<'q, D: QueryData<'q>> Query<'q, D> {
     }
 }
 
-impl<'q, D: QueryData<'q>> IntoIterator for Query<'q, D> {
+impl<'q, D> IntoIterator for Query<'q, D>
+where
+    D: QueryData<'q>,
+{
     type Item = D::Item;
 
     type IntoIter = QueryIterator<'q, D>;

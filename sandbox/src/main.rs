@@ -11,19 +11,15 @@ pub struct NamedRes {
 
 impl Resource for NamedRes {}
 
-struct PrintResource;
+struct PrintRes;
 
-impl System for PrintResource {
+impl System for PrintRes {
     type QueryData<'q> = Res<'q, NamedRes>;
 
     fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>) {
-        let resource = query.into_iter().next().unwrap();
-        println!("{resource:?}")
+        let res = query.into_iter().next().unwrap();
+        println!("{res:?}")
     }
-}
-
-fn print_res(res: &NamedRes) {
-    dbg!(res);
 }
 
 fn main() {
@@ -32,7 +28,7 @@ fn main() {
     let res = NamedRes { name: "John" };
     world.insert_resource(res).unwrap();
 
-    world.add_system(PrintResource, "print_resource").unwrap();
+    world.add_system(PrintRes, "print_resource").unwrap();
 
     world.run_systems();
 

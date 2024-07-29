@@ -2,6 +2,7 @@
 #![feature(negative_impls)]
 #![feature(trait_alias)]
 #![feature(marker_trait_attr)]
+#![feature(associated_type_defaults)]
 
 pub mod component;
 pub mod entity;

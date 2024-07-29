@@ -19,7 +19,8 @@ macro_rules! impl_data {
             $head: QueryElement<'q>,
             $($tail: QueryElement<'q>),+
         {
-            type Item = ($head::Item, $($tail::Item),+);
+            type Item = (<$head as QueryElement<'q>>::Item,
+                $(<$tail as QueryElement<'q>>::Item),+);
 
             fn inner_type_ids() -> Vec<TypeId> {
                 vec![$head::inner_type_id(), $($tail::inner_type_id()),+]
@@ -45,7 +46,7 @@ macro_rules! impl_data {
         where
             $head: QueryElement<'q>,
         {
-            type Item = $head::Item;
+            type Item = <$head as QueryElement<'q>>::Item;
 
             fn inner_type_ids() -> Vec<TypeId> {
                 vec![$head::inner_type_id()]
