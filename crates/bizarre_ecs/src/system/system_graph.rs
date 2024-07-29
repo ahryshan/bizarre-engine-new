@@ -80,7 +80,13 @@ impl SystemGraph {
                 unsafe {
                     parent.as_mut().add_child(node);
                     node.as_mut().set_parent(parent);
-                    self.deps_map.insert(node, gather_parent_names(node).into());
+                    self.deps_map.insert(
+                        node,
+                        gather_parent_names(node)
+                            .into_iter()
+                            .filter(|i| !i.is_empty())
+                            .collect::<Box<[&str]>>(),
+                    );
                 }
                 Ok(())
             }
