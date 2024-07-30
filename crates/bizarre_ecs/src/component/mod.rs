@@ -8,6 +8,7 @@ use error::{ComponentError, ComponentResult};
 
 use crate::entity::Entity;
 
+pub mod component_cmd;
 pub mod component_storage;
 pub mod error;
 
@@ -36,7 +37,7 @@ impl Components {
         component: C,
     ) -> ComponentResult {
         let component = component.into_stored_component();
-        let index = self.get_index_for_stored(&component)?;
+        let index = self.get_index_raw(component.inner_type_id(), component.component_name())?;
         self.storages[index].insert(entity, component)?;
 
         let (stored_entity, stored_bitmask) = self.entity_bitmasks[entity.index()];
@@ -113,22 +114,30 @@ impl Components {
     /// component, this function will do nothing
     ///
     pub fn register<C: Component>(&mut self) {
-        if self.get_index::<C>().is_ok() {
+        self.register_raw(C::inner_type_id(), C::inner_type_name())
+    }
+
+    pub fn register_raw(&mut self, type_id: TypeId, name: &'static str) {
+        if self.get_index_raw(type_id, name).is_ok() {
             return;
         }
 
         if let Some(index) = self.id_dumpster.pop_front() {
-            self.storages[index] = ComponentStorage::with_capacity::<C>(self.storage_capacity);
+            self.storages[index] =
+                ComponentStorage::with_capacity_raw(type_id, name, self.storage_capacity);
             self.bitmasks[index] = 1 << index;
-            self.lookup.insert(C::inner_type_id(), index);
+            self.lookup.insert(type_id, index);
         } else {
             let index = self.storages.len();
 
-            self.storages
-                .push(ComponentStorage::with_capacity::<C>(self.storage_capacity));
+            self.storages.push(ComponentStorage::with_capacity_raw(
+                type_id,
+                name,
+                self.storage_capacity,
+            ));
             self.bitmasks.push(1 << index);
 
-            self.lookup.insert(C::inner_type_id(), index);
+            self.lookup.insert(type_id, index);
         }
     }
 
@@ -166,11 +175,14 @@ impl Components {
             .ok_or(ComponentError::NotPresentStorage(C::inner_type_name()))
     }
 
-    #[inline(always)]
-    fn get_index_for_stored(&self, component: &StoredComponent) -> ComponentResult<usize> {
-        self.lookup.get(&component.inner_type_id()).copied().ok_or(
-            ComponentError::NotPresentStorage(component.component_name()),
-        )
+    /// Does the same as [`Components::get_index`] but instead of generic component it must get
+    /// `type_id` and `component_name` of the underlying `Component`
+    #[inline]
+    fn get_index_raw(&self, type_id: TypeId, name: &'static str) -> ComponentResult<usize> {
+        self.lookup
+            .get(&type_id)
+            .copied()
+            .ok_or(ComponentError::NotPresentStorage(name))
     }
 
     pub fn filter_entities(&self, type_ids: &[TypeId]) -> Vec<Entity> {

@@ -8,6 +8,7 @@ use error::{ResourceError, ResourceResult};
 use crate::component::component_storage::{IntoStoredComponent, Storable, StoredComponent};
 
 pub mod error;
+pub mod resource_cmd;
 
 #[derive(Default)]
 pub struct Resources {

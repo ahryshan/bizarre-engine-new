@@ -134,6 +134,17 @@ impl ComponentStorage {
         }
     }
 
+    pub fn new_raw(type_id: TypeId, component_name: &'static str) -> Self {
+        Self {
+            components: Vec::new(),
+            component_name,
+            type_id,
+            frozen_entities: Default::default(),
+            capacity: 0,
+            occupied: 0,
+        }
+    }
+
     pub fn with_capacity<C: Component>(capacity: usize) -> Self {
         let components = (0..capacity).map(|_| None).collect();
         let frozen_entities = vec![Entity::from_gen_id(0, 0); capacity];
@@ -141,6 +152,23 @@ impl ComponentStorage {
             components,
             component_name: C::inner_type_name(),
             type_id: TypeId::of::<C>(),
+            frozen_entities,
+            capacity,
+            occupied: 0,
+        }
+    }
+
+    pub fn with_capacity_raw(
+        type_id: TypeId,
+        component_name: &'static str,
+        capacity: usize,
+    ) -> Self {
+        let components = (0..capacity).map(|_| None).collect();
+        let frozen_entities = vec![Entity::from_gen_id(0, 0); capacity];
+        Self {
+            components,
+            component_name,
+            type_id,
             frozen_entities,
             capacity,
             occupied: 0,

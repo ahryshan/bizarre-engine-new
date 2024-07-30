@@ -1,25 +1,27 @@
-use crate::{component::Component, world::World};
+use crate::{component::component_storage::IntoStoredComponent, world::World};
 
-use super::Entity;
+use super::entity_commands::SpawnEntityCmd;
 
 pub struct EntityBuilder<'a> {
     world: &'a mut World,
-    entity: Entity,
+    cmd: SpawnEntityCmd,
 }
 
 impl<'a> EntityBuilder<'a> {
     pub fn new(world: &'a mut World) -> Self {
-        let entity = world.create_entity();
-        Self { world, entity }
+        Self {
+            world,
+            cmd: Default::default(),
+        }
     }
 
-    pub fn with_component<C: Component>(self, component: C) -> Self {
-        self.world.register_component::<C>();
-        self.world.insert_component(self.entity, component).unwrap();
+    #[must_use = "build() must be called for entity to spawn"]
+    pub fn with_component<C: IntoStoredComponent>(mut self, component: C) -> Self {
+        self.cmd.components.push(component.into_stored_component());
         self
     }
 
-    pub fn build(self) -> Entity {
-        self.entity
+    pub fn build(self) {
+        self.world.push_command(self.cmd);
     }
 }

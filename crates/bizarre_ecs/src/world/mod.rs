@@ -1,5 +1,9 @@
+use command_queue::{Command, CommandQueue, RawCommandQueue};
+
 use crate::{
-    component::{error::ComponentResult, Component, Components},
+    component::{
+        component_storage::IntoStoredComponent, error::ComponentResult, Component, Components,
+    },
     entity::{builder::EntityBuilder, entities::Entities, error::EntityResult, Entity},
     query::{query_data::QueryData, Query},
     resource::{error::ResourceResult, Resource, Resources},
@@ -10,6 +14,8 @@ use crate::{
     },
 };
 
+pub mod command_queue;
+pub mod commands;
 pub mod world_unsafe_cell;
 
 #[derive(Default)]
@@ -18,6 +24,7 @@ pub struct World {
     pub(crate) components: Components,
     pub(crate) resources: Resources,
     pub(crate) schedules: Schedules,
+    pub(crate) cmd_queue: RawCommandQueue,
 }
 
 impl World {
@@ -35,7 +42,7 @@ impl World {
         Ok(())
     }
 
-    pub fn insert_component<C: Component>(
+    pub fn insert_component<C: IntoStoredComponent>(
         &mut self,
         entity: Entity,
         component: C,
@@ -101,8 +108,45 @@ impl World {
             .add_system(schedule, name, dependencies, system)
     }
 
-    pub fn run_schedule(&self, schedule: Schedule) -> SystemResult {
-        self.schedules.run(schedule, self)
+    pub fn frame(&mut self) -> SystemResult {
+        self.run_schedule(Schedule::Frame)
+    }
+
+    pub fn tick(&mut self) -> SystemResult {
+        self.run_schedule(Schedule::Tick)
+    }
+
+    pub fn init(&mut self) -> SystemResult {
+        self.run_schedule(Schedule::Init)
+    }
+
+    pub fn run_schedule(&mut self, schedule: Schedule) -> SystemResult {
+        let cmd = self.schedules.run(schedule, self)?;
+        self.push_command_queue(cmd);
+        self.flush();
+
+        Ok(())
+    }
+
+    pub fn push_command(&mut self, cmd: impl Command) {
+        unsafe {
+            self.cmd_queue.push(cmd);
+        }
+    }
+
+    pub fn push_command_queue(&mut self, mut queue: CommandQueue) {
+        unsafe { self.cmd_queue.append(&mut queue.get_raw()) }
+    }
+
+    pub fn flush(&mut self) {
+        unsafe { self.cmd_queue.clone().apply_or_drop(Some(self.into())) }
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        unsafe { self.cmd_queue.apply_or_drop(None) };
+        drop(unsafe { Box::from_raw(self.cmd_queue.bytes.as_ptr()) });
     }
 }
 

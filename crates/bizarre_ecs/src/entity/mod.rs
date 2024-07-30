@@ -4,6 +4,7 @@ use crate::query::query_element::QueryElement;
 
 pub mod builder;
 pub mod entities;
+pub mod entity_commands;
 pub mod error;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Hash, Clone, Copy)]

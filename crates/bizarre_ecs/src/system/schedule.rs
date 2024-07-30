@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::World;
+use crate::{world::command_queue::CommandQueue, World};
 
 use super::{
     error::{SystemError, SystemResult},
@@ -38,11 +38,11 @@ impl Schedules {
         }
     }
 
-    pub fn run(&self, schedule: Schedule, world: &World) -> SystemResult {
+    pub fn run(&self, schedule: Schedule, world: &World) -> SystemResult<CommandQueue> {
         if let Some(sch) = self.schedules.get(&schedule) {
-            sch.init_systems(world);
-            sch.run_systems(world);
-            Ok(())
+            let mut cmd = sch.init_systems(world);
+            cmd.append(&mut sch.run_systems(world));
+            Ok(cmd)
         } else {
             Err(SystemError::NoSchedule { schedule })
         }

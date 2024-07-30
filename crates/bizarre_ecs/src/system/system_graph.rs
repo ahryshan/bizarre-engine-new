@@ -6,7 +6,7 @@ use std::{
 
 use bizarre_memory::arena::typed::TypedArena;
 
-use crate::World;
+use crate::{world::command_queue::CommandQueue, World};
 
 use super::{
     error::{SystemError, SystemResult},
@@ -102,9 +102,9 @@ impl SystemGraph {
         }
     }
 
-    pub fn init_systems(&self, world: &World) {
+    pub fn init_systems(&self, world: &World) -> CommandQueue {
         if self.root.is_none() {
-            return;
+            return CommandQueue::default();
         }
 
         NodeIterator::new(self.root.unwrap())
@@ -117,12 +117,20 @@ impl SystemGraph {
                     Some(&mut node.data.system)
                 }
             })
-            .for_each(|s| s.init(world));
+            .map(|s| s.init(world))
+            .fold(CommandQueue::default(), |mut acc, mut curr| {
+                if curr.is_empty() {
+                    acc
+                } else {
+                    acc.append(&mut curr);
+                    acc
+                }
+            })
     }
 
-    pub fn run_systems(&self, world: &World) {
+    pub fn run_systems(&self, world: &World) -> CommandQueue {
         if self.root.is_none() {
-            return;
+            return CommandQueue::default();
         }
 
         NodeIterator::new(self.root.unwrap())
@@ -130,10 +138,14 @@ impl SystemGraph {
                 let system = unsafe { n.as_ref() };
                 system.data.init
             })
-            .for_each(|mut n| {
+            .map(|mut n| {
                 let system = unsafe { &mut n.as_mut().data };
                 system.system.run(world)
-            });
+            })
+            .fold(CommandQueue::default(), |mut acc, mut curr| {
+                acc.append(&mut curr);
+                acc
+            })
     }
 
     fn find_first_appropriate_parent(

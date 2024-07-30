@@ -37,6 +37,7 @@ impl Entities {
         } else {
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
             let entity = Entity::from_gen_id(1, id);
+            self.entities.push(entity);
             (entity, false)
         }
     }

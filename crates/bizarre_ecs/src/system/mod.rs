@@ -1,6 +1,8 @@
+use std::ptr::NonNull;
+
 use crate::{
     query::{query_data::QueryData, Query},
-    world::{world_unsafe_cell::UnsafeWorldCell, World},
+    world::{command_queue::CommandQueue, commands::Commands, World},
 };
 
 pub mod error;
@@ -8,57 +10,51 @@ pub mod schedule;
 pub mod system_graph;
 
 pub trait System {
-    type QueryData<'q>: QueryData<'q> = ();
+    type InitData<'q>: QueryData<'q> = ();
+    type RunData<'q>: QueryData<'q> = ();
+    type DisposeData<'q>: QueryData<'q> = ();
 
-    fn init(&mut self, world: &mut World) {
-        let _ = world;
+    fn init<'q>(&mut self, query: Query<'q, Self::InitData<'q>>, commands: &mut Commands) {
+        let _ = commands;
+        let _ = query;
     }
-    fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>);
-    fn dispose(&mut self, world: &mut World) {
-        let _ = world;
-    }
-}
-
-impl<D> System for fn(Query<D>)
-where
-    D: for<'b> QueryData<'b>,
-{
-    type QueryData<'q> = D;
-
-    fn run<'q>(&mut self, query: Query<'q, Self::QueryData<'q>>) {
-        self(query)
+    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, commands: &mut Commands);
+    fn dispose<'q>(&mut self, query: Query<'q, Self::DisposeData<'q>>, commands: &mut Commands) {
+        let _ = commands;
+        let _ = query;
     }
 }
 
-trait RunFn = for<'a> Fn(*mut (), UnsafeWorldCell<'a>);
-trait InitFn = for<'a> Fn(*mut (), UnsafeWorldCell<'a>);
-trait DisposeFn = for<'a> Fn(*mut (), UnsafeWorldCell<'a>);
+type InitFn = unsafe fn(NonNull<()>, NonNull<World>) -> CommandQueue;
+type RunFn = unsafe fn(NonNull<()>, NonNull<World>) -> CommandQueue;
+type DisposeFn = unsafe fn(NonNull<()>, NonNull<World>) -> CommandQueue;
+type DropFn = unsafe fn(NonNull<()>);
 
 pub struct StoredSystem {
-    state: *mut (),
-    init_fn: Option<Box<dyn InitFn>>,
-    run_fn: Box<dyn RunFn>,
-    dispose_fn: Option<Box<dyn DisposeFn>>,
+    state: NonNull<()>,
+    init_fn: InitFn,
+    run_fn: RunFn,
+    dispose_fn: DisposeFn,
+    drop_fn: DropFn,
 }
 
 impl StoredSystem {
-    pub fn init(&self, world: &World) {
-        if let Some(func) = &self.init_fn {
-            let cell = unsafe { UnsafeWorldCell::new(world) };
-            (func)(self.state, cell)
-        }
+    pub fn init(&mut self, world: &World) -> CommandQueue {
+        unsafe { (self.init_fn)(self.state, world.into()) }
     }
 
-    pub fn run(&self, world: &World) {
-        let cell = unsafe { UnsafeWorldCell::new(world) };
-        (self.run_fn)(self.state, cell)
+    pub fn run(&mut self, world: &World) -> CommandQueue {
+        unsafe { (self.run_fn)(self.state, world.into()) }
     }
 
-    pub fn dispose(&self, world: &mut World) {
-        if let Some(func) = &self.dispose_fn {
-            let cell = unsafe { UnsafeWorldCell::new(world) };
-            (func)(self.state, cell)
-        }
+    pub fn dispose(&mut self, world: &World) -> CommandQueue {
+        unsafe { (self.dispose_fn)(self.state, world.into()) }
+    }
+}
+
+impl Drop for StoredSystem {
+    fn drop(&mut self) {
+        unsafe { (self.drop_fn)(self.state) }
     }
 }
 
@@ -66,69 +62,45 @@ pub trait IntoStoredSystem {
     fn into_stored_system(self) -> StoredSystem;
 }
 
-// impl<D> IntoStoredSystem for for<'a> fn(Query<'a, D>)
-// where
-//     D: for<'a> QueryData<'a>,
-// {
-//     fn into_stored_system(self) -> StoredSystem {
-//         let state = { Box::into_raw(Box::new(self)) as *mut _ };
-//         let run_fn = |this: *mut (), world: UnsafeWorldCell| {
-//             let (this, world) = unsafe { ((this as *mut Self).as_ref().unwrap(), world.get()) };
-//
-//             let query = world.query();
-//
-//             this(query)
-//         };
-//
-//         let run_fn = Box::new(run_fn);
-//
-//         StoredSystem {
-//             state,
-//             run_fn,
-//             init_fn: None,
-//             dispose_fn: None,
-//         }
-//     }
-// }
-
-impl<S: System> IntoStoredSystem for S {
+impl<T> IntoStoredSystem for T
+where
+    T: System,
+{
     fn into_stored_system(self) -> StoredSystem {
-        let state = {
-            let boxed = Box::new(self);
-            Box::into_raw(boxed) as *mut _
-        };
-
-        let init_fn = |this: *mut (), world: UnsafeWorldCell| {
-            let (this, world) = unsafe { (&mut *this.cast(), world.get_mut()) };
-
-            S::init(this, world)
-        };
-
-        let init_fn = Box::new(init_fn);
-
-        let run_fn = |this: *mut (), world: UnsafeWorldCell| {
-            let (this, world) = unsafe { (&mut *this.cast(), world.get()) };
-
-            let query = world.query();
-
-            S::run(this, query)
-        };
-
-        let run_fn = Box::new(run_fn);
-
-        let dispose_fn = |this: *mut (), world: UnsafeWorldCell| {
-            let (this, world) = unsafe { (&mut *this.cast(), world.get_mut()) };
-
-            S::dispose(this, world);
-        };
-
-        let dispose_fn = Box::new(dispose_fn);
-
         StoredSystem {
-            state,
-            init_fn: Some(init_fn),
-            run_fn,
-            dispose_fn: Some(dispose_fn),
+            state: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self)).cast()) },
+            init_fn: |state, mut world| {
+                let (state, world) = unsafe { (state.cast().as_mut(), world.as_mut()) };
+                let query = world.query();
+                let mut commands = Commands::default();
+
+                Self::init(state, query, &mut commands);
+
+                commands.into_queue()
+            },
+            run_fn: |state, mut world| {
+                let (state, world) = unsafe { (state.cast().as_mut(), world.as_mut()) };
+                let query = world.query();
+                let mut commands = Commands::default();
+
+                Self::run(state, query, &mut commands);
+
+                commands.into_queue()
+            },
+            dispose_fn: |state, mut world| {
+                let (state, world) = unsafe { (state.cast().as_mut(), world.as_mut()) };
+                let query = world.query();
+                let mut commands = Commands::default();
+
+                Self::dispose(state, query, &mut commands);
+
+                commands.into_queue()
+            },
+
+            drop_fn: |state| {
+                let state: Self = unsafe { state.cast().read_unaligned() };
+                drop(state)
+            },
         }
     }
 }
@@ -136,9 +108,9 @@ impl<S: System> IntoStoredSystem for S {
 #[cfg(test)]
 mod tests {
     use crate::{
-        query::fetch::Fetch,
+        query::{fetch::Fetch, Query},
         test_commons::{Health, Mana},
-        world::World,
+        world::{commands::Commands, World},
     };
 
     use super::{IntoStoredSystem, System};
@@ -148,9 +120,9 @@ mod tests {
     }
 
     impl System for HelloWorldSystem {
-        type QueryData<'q> = Fetch<'q, Health>;
+        type RunData<'q> = Fetch<'q, Health>;
 
-        fn run<'q>(&mut self, query: crate::query::Query<'q, Self::QueryData<'q>>) {
+        fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, _: &mut Commands) {
             let count = query.into_iter().filter(|h| h.0 > 50).count();
 
             self.healthy_entities += count;
