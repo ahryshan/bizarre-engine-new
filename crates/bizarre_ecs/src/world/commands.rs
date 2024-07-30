@@ -1,12 +1,6 @@
 use crate::{
-    component::{
-        component_cmd::{AddComponentCmd, RegisterComponentCmd, RemoveComponentCmd},
-        component_storage::IntoStoredComponent,
-    },
-    entity::{
-        self,
-        entity_commands::{KillEntitiesCmd, SpawnEntityCmd},
-    },
+    component::component_cmd::{AddComponentCmd, RegisterComponentCmd, RemoveComponentCmd},
+    entity::entity_commands::{KillEntitiesCmd, SpawnEntityCmd},
     query::query_element::QueryElement,
     resource::resource_cmd::{InsertResourceCmd, RemoveResourceCmd},
     Component, Entity, Resource,
@@ -67,23 +61,5 @@ impl Commands {
 
     pub fn push_custom_cmd<T: Command>(&mut self, command: T) {
         self.queue.push(command)
-    }
-}
-
-impl<'q> QueryElement<'q> for Commands {
-    type Item = Self;
-
-    fn inner_type_id() -> Option<std::any::TypeId> {
-        None
-    }
-
-    fn is_non_component() -> bool {
-        true
-    }
-
-    fn get_item(_: &'q crate::World, _: crate::Entity) -> Self::Item {
-        Self {
-            queue: CommandQueue::default(),
-        }
     }
 }

@@ -10,16 +10,16 @@ pub mod schedule;
 pub mod system_graph;
 
 pub trait System {
-    type InitData<'q>: QueryData<'q> = ();
-    type RunData<'q>: QueryData<'q> = ();
-    type DisposeData<'q>: QueryData<'q> = ();
+    type InitData: QueryData = ();
+    type RunData: QueryData = ();
+    type DisposeData: QueryData = ();
 
-    fn init<'q>(&mut self, query: Query<'q, Self::InitData<'q>>, commands: &mut Commands) {
+    fn init(&mut self, query: Query<'_, Self::InitData>, commands: &mut Commands) {
         let _ = commands;
         let _ = query;
     }
-    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, commands: &mut Commands);
-    fn dispose<'q>(&mut self, query: Query<'q, Self::DisposeData<'q>>, commands: &mut Commands) {
+    fn run(&mut self, query: Query<'_, Self::RunData>, commands: &mut Commands);
+    fn dispose(&mut self, query: Query<'_, Self::DisposeData>, commands: &mut Commands) {
         let _ = commands;
         let _ = query;
     }
@@ -120,9 +120,9 @@ mod tests {
     }
 
     impl System for HelloWorldSystem {
-        type RunData<'q> = Fetch<'q, Health>;
+        type RunData<'a> = Fetch<'a, Health>;
 
-        fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, _: &mut Commands) {
+        fn run<'q>(&mut self, query: Query<'q, Self::RunData>, _: &mut Commands) {
             let count = query.into_iter().filter(|h| h.0 > 50).count();
 
             self.healthy_entities += count;

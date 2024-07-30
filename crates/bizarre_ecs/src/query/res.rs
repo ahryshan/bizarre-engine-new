@@ -1,24 +1,24 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ptr::NonNull};
 
 use crate::{entity::Entity, resource::Resource, world::World};
 
 use super::query_element::QueryElement;
 
-pub struct Res<'q, T>(PhantomData<&'q T>)
+pub struct Res<T>(PhantomData<T>)
 where
     T: Resource;
 
-impl<'q, T> QueryElement<'q> for Res<'q, T>
+impl<T> QueryElement for Res<T>
 where
     T: Resource,
 {
-    type Item = &'q T;
+    type Item<'a> = &'a T;
 
     fn inner_type_id() -> Option<std::any::TypeId> {
         None
     }
 
-    fn get_item(world: &'q World, _: Entity) -> Self::Item {
+    fn get_item<'a>(world: &'a World, _: Entity) -> Self::Item<'a> {
         world.resources.get::<T>().unwrap()
     }
 
@@ -27,21 +27,21 @@ where
     }
 }
 
-pub struct ResMut<'q, T>(PhantomData<&'q T>)
+pub struct ResMut<T>(PhantomData<T>)
 where
     T: Resource;
 
-impl<'q, T> QueryElement<'q> for ResMut<'q, T>
+impl<T> QueryElement for ResMut<T>
 where
     T: Resource,
 {
-    type Item = &'q mut T;
+    type Item<'a> = &'a mut T;
 
     fn inner_type_id() -> Option<std::any::TypeId> {
         None
     }
 
-    fn get_item(world: &'q World, _: Entity) -> Self::Item {
+    fn get_item<'a>(world: &'a World, _: Entity) -> Self::Item<'a> {
         world.resources.get_mut::<T>().unwrap()
     }
 

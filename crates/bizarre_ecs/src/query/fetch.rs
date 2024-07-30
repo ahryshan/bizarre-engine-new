@@ -1,24 +1,24 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ptr::NonNull};
 
 use crate::{component::Component, entity::Entity, world::World};
 
 use super::query_element::QueryElement;
 
-pub struct Fetch<'q, T>(PhantomData<&'q T>)
+pub struct Fetch<T>(PhantomData<T>)
 where
     T: Component;
 
-impl<'q, T> QueryElement<'q> for Fetch<'q, T>
+impl<T> QueryElement for Fetch<T>
 where
     T: Component,
 {
-    type Item = &'q T;
+    type Item<'a> = &'a T;
 
     fn inner_type_id() -> Option<std::any::TypeId> {
         Some(T::inner_type_id())
     }
 
-    fn get_item(world: &'q World, entity: Entity) -> Self::Item {
+    fn get_item<'a>(world: &'a World, entity: Entity) -> Self::Item<'a> {
         world.components.get::<T>(entity).unwrap()
     }
 
@@ -27,21 +27,21 @@ where
     }
 }
 
-pub struct FetchMut<'q, T>(PhantomData<&'q T>)
+pub struct FetchMut<T>(PhantomData<T>)
 where
     T: Component;
 
-impl<'q, T> QueryElement<'q> for FetchMut<'q, T>
+impl<T> QueryElement for FetchMut<T>
 where
     T: Component,
 {
-    type Item = &'q mut T;
+    type Item<'a> = &'a mut T;
 
     fn inner_type_id() -> Option<std::any::TypeId> {
         Some(T::inner_type_id())
     }
 
-    fn get_item(world: &'q World, entity: Entity) -> Self::Item {
+    fn get_item<'a>(world: &'a World, entity: Entity) -> Self::Item<'a> {
         world.components.get_mut::<T>(entity).unwrap()
     }
 

@@ -11,12 +11,12 @@ pub mod query_element;
 pub mod query_iterator;
 pub mod res;
 
-pub struct Query<'q, D: QueryData<'q>> {
+pub struct Query<'q, D: QueryData> {
     world: &'q World,
     _phantom: PhantomData<&'q D>,
 }
 
-impl<'q, D: QueryData<'q>> Query<'q, D> {
+impl<'q, D: QueryData> Query<'q, D> {
     pub fn new(world: &'q World) -> Self {
         Self {
             world,
@@ -27,9 +27,9 @@ impl<'q, D: QueryData<'q>> Query<'q, D> {
 
 impl<'q, D> IntoIterator for Query<'q, D>
 where
-    D: QueryData<'q>,
+    D: QueryData,
 {
-    type Item = D::Item;
+    type Item = D::Item<'q>;
 
     type IntoIter = QueryIterator<'q, D>;
 

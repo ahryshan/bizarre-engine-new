@@ -1,9 +1,9 @@
-use std::any::TypeId;
+use std::{any::TypeId, ptr::NonNull};
 
 use crate::{entity::Entity, world::World};
 
-pub trait QueryElement<'q> {
-    type Item;
+pub trait QueryElement {
+    type Item<'a>;
 
     /// Returns inner type id of the underlying component;
     ///
@@ -11,5 +11,5 @@ pub trait QueryElement<'q> {
     /// [`Component`][crate::component::Component] from [`World`]
     fn inner_type_id() -> Option<TypeId>;
     fn is_non_component() -> bool;
-    fn get_item(world: &'q World, entity: Entity) -> Self::Item;
+    fn get_item<'a>(world: &'a World, entity: Entity) -> Self::Item<'a>;
 }

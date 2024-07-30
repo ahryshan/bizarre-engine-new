@@ -84,7 +84,7 @@ impl World {
         self.resources.remove()
     }
 
-    pub fn query<'q, D: QueryData<'q>>(&'q self) -> Query<'q, D> {
+    pub fn query<'q, D: QueryData>(&'q self) -> Query<'q, D> {
         Query::new(self)
     }
 

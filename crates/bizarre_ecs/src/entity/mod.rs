@@ -1,6 +1,6 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ptr::NonNull};
 
-use crate::query::query_element::QueryElement;
+use crate::{query::query_element::QueryElement, world::World};
 
 pub mod builder;
 pub mod entities;
@@ -55,15 +55,14 @@ impl Debug for Entity {
     }
 }
 
-impl<'q> QueryElement<'q> for Entity {
-    type Item = Entity;
+impl QueryElement for Entity {
+    type Item<'a> = Entity;
 
     fn inner_type_id() -> Option<std::any::TypeId> {
         None
     }
 
-    fn get_item(world: &'q crate::world::World, entity: Entity) -> Self::Item {
-        let _ = world;
+    fn get_item<'a>(_: &'a World, entity: Entity) -> Self::Item<'a> {
         entity
     }
 

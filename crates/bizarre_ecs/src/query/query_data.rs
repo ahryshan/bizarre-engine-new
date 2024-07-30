@@ -4,16 +4,16 @@ use crate::{entity::Entity, world::World};
 
 use super::query_element::QueryElement;
 
-pub trait QueryData<'q> {
-    type Item;
+pub trait QueryData {
+    type Item<'a>;
 
     fn inner_type_ids() -> Vec<TypeId>;
     fn is_non_component() -> bool;
-    fn get_item(world: &'q World, entity: Entity) -> Self::Item;
+    fn get_item(world: &World, entity: Entity) -> Self::Item<'_>;
 }
 
-impl<'q> QueryData<'q> for () {
-    type Item = ();
+impl QueryData for () {
+    type Item<'a> = ();
 
     fn inner_type_ids() -> Vec<TypeId> {
         vec![]
@@ -23,18 +23,18 @@ impl<'q> QueryData<'q> for () {
         true
     }
 
-    fn get_item(world: &'q World, entity: Entity) -> Self::Item {}
+    fn get_item(_: &World, _: Entity) -> Self::Item<'_> {}
 }
 
 macro_rules! impl_data {
     ($head:tt, $($tail:tt),+) => {
-        impl<'q, $head, $($tail),+> QueryData<'q> for ($head, $($tail),+)
+        impl<$head, $($tail),+> QueryData for ($head, $($tail),+)
         where
-            $head: QueryElement<'q>,
-            $($tail: QueryElement<'q>),+
+            $head: QueryElement,
+            $($tail: QueryElement),+
         {
-            type Item = (<$head as QueryElement<'q>>::Item,
-                $(<$tail as QueryElement<'q>>::Item),+);
+            type Item<'a> = (<$head as QueryElement>::Item<'a>,
+                $(<$tail as QueryElement>::Item<'a>),+);
 
             fn inner_type_ids() -> Vec<TypeId> {
                 vec![$head::inner_type_id(), $($tail::inner_type_id()),+]
@@ -43,7 +43,7 @@ macro_rules! impl_data {
                     .collect()
             }
 
-            fn get_item(world: &'q World, entity: Entity) -> Self::Item {
+            fn get_item(world: &World, entity: Entity) -> Self::Item<'_> {
                 ($head::get_item(world, entity), $($tail::get_item(world, entity)),+)
             }
 
@@ -56,11 +56,11 @@ macro_rules! impl_data {
     };
 
     ($head:tt) => {
-        impl<'q, $head> QueryData<'q> for $head
+        impl<$head> QueryData for $head
         where
-            $head: QueryElement<'q>,
+            $head: QueryElement,
         {
-            type Item = <$head as QueryElement<'q>>::Item;
+            type Item<'a> = <$head as QueryElement>::Item<'a>;
 
             fn inner_type_ids() -> Vec<TypeId> {
                 vec![$head::inner_type_id()]
@@ -69,7 +69,7 @@ macro_rules! impl_data {
                     .collect()
             }
 
-            fn get_item(world: &'q World, entity: Entity) -> Self::Item {
+            fn get_item(world: &World, entity: Entity) -> Self::Item<'_> {
                 $head::get_item(world, entity)
             }
 

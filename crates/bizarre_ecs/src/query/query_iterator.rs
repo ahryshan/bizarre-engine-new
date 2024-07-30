@@ -6,7 +6,7 @@ use super::query_data::QueryData;
 
 pub struct QueryIterator<'q, T>
 where
-    T: QueryData<'q>,
+    T: QueryData,
 {
     world: &'q World,
     entities: Vec<Entity>,
@@ -17,7 +17,7 @@ where
 
 impl<'q, T> QueryIterator<'q, T>
 where
-    T: QueryData<'q>,
+    T: QueryData,
 {
     pub(crate) fn new(world: &'q World, entities: Vec<Entity>) -> Self {
         Self {
@@ -32,14 +32,14 @@ where
 
 impl<'q, D> Iterator for QueryIterator<'q, D>
 where
-    D: QueryData<'q>,
+    D: QueryData,
 {
-    type Item = D::Item;
+    type Item = D::Item<'q>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if D::is_non_component() {
             if !self.yielded_non_component {
-                return Some(D::get_item(self.world, Entity::from_gen_id(0, 0)));
+                return Some(unsafe { D::get_item(self.world.into(), Entity::from_gen_id(0, 0)) });
             } else {
                 return None;
             }
@@ -51,7 +51,7 @@ where
 
         let entity = self.entities[self.index];
 
-        let item = D::get_item(self.world, entity);
+        let item = unsafe { D::get_item(self.world.into(), entity) };
         self.index += 1;
         Some(item)
     }

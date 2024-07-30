@@ -13,9 +13,9 @@ impl Component for NameComponent {}
 pub struct GreetEntity;
 
 impl System for GreetEntity {
-    type RunData<'q> = (Entity, Fetch<'q, NameComponent>);
+    type RunData = (Entity, Fetch<NameComponent>);
 
-    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, _: &mut Commands) {
+    fn run(&mut self, query: Query<Self::RunData>, _: &mut Commands) {
         for (entity, name) in query {
             println!("Hello, {} ({entity:?})", name.0);
         }
@@ -25,9 +25,9 @@ impl System for GreetEntity {
 pub struct GreetEntityAgain;
 
 impl System for GreetEntityAgain {
-    type RunData<'q> = (Entity, Fetch<'q, NameComponent>);
+    type RunData = (Entity, Fetch<NameComponent>);
 
-    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, _: &mut Commands) {
+    fn run(&mut self, query: Query<Self::RunData>, _: &mut Commands) {
         for (entity, name) in query {
             println!("Hello again, {} ({entity:?})", name.0);
         }
@@ -37,9 +37,7 @@ impl System for GreetEntityAgain {
 pub struct GreetWorld;
 
 impl System for GreetWorld {
-    type RunData<'q> = ();
-
-    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, _: &mut Commands) {
+    fn run(&mut self, query: Query<Self::RunData>, _: &mut Commands) {
         println!("Hello World!");
     }
 }
@@ -47,9 +45,9 @@ impl System for GreetWorld {
 pub struct KillAllJohns;
 
 impl System for KillAllJohns {
-    type RunData<'q> = (Entity, Fetch<'q, NameComponent>);
+    type RunData = (Entity, Fetch<NameComponent>);
 
-    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, commands: &mut Commands) {
+    fn run(&mut self, query: Query<Self::RunData>, commands: &mut Commands) {
         let e = query
             .into_iter()
             .filter_map(|(e, n)| if n.0 == "John" { Some(e) } else { None })
@@ -62,9 +60,9 @@ impl System for KillAllJohns {
 pub struct ReviveJohn;
 
 impl System for ReviveJohn {
-    type RunData<'q> = Fetch<'q, NameComponent>;
+    type RunData = Fetch<NameComponent>;
 
-    fn run<'q>(&mut self, query: Query<'q, Self::RunData<'q>>, commands: &mut Commands) {
+    fn run(&mut self, query: Query<Self::RunData>, commands: &mut Commands) {
         let count = query.into_iter().filter(|name| name.0 == "John").count();
 
         if count < 1 {
