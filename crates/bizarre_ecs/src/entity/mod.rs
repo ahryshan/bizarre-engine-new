@@ -1,4 +1,10 @@
-use std::fmt::Debug;
+use std::{
+    collections::VecDeque,
+    fmt::Debug,
+    sync::atomic::{self, AtomicU64, AtomicUsize},
+};
+
+use crate::query::query_element::QueryData;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Hash, Clone, Copy)]
 pub struct Entity {
@@ -48,3 +54,47 @@ impl Debug for Entity {
     }
 }
 
+impl QueryData for Entity {
+    type Item<'w> = Self;
+
+    fn resource_ids() -> Vec<crate::resource::ResourceId> {
+        vec![]
+    }
+
+    unsafe fn get_item(
+        _: crate::world::unsafe_world_cell::UnsafeWorldCell,
+        entity: Entity,
+    ) -> Self::Item<'_> {
+        entity
+    }
+}
+
+#[derive(Default)]
+pub struct EntitySpawner {
+    next_id: AtomicU64,
+    dead: VecDeque<Entity>,
+}
+
+impl EntitySpawner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn new_entity(&mut self) -> (Entity, bool) {
+        if let Some(mut entity) = self.dead.pop_front() {
+            entity.set_gen(entity.gen() + 1);
+            (entity, true)
+        } else {
+            let id = self.next_id.fetch_add(1, atomic::Ordering::SeqCst);
+            (Entity::from_gen_id(1, id), false)
+        }
+    }
+
+    pub fn kill(&mut self, entity: Entity) {
+        if self.dead.contains(&entity) {
+            panic!("Trying to kill an `Entity` which is already dead");
+        }
+
+        self.dead.push_back(entity)
+    }
+}

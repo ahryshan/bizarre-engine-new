@@ -84,8 +84,7 @@ pub struct ComponentBuffer {
     item_size: usize,
     drop_fn: unsafe fn(NonNull<u8>),
     data: Vec<MaybeUninit<u8>>,
-    /// Offsets in bytes to valid objects in buffer
-    valid_offsets: BTreeSet<usize>,
+    valid_indices: BTreeSet<usize>,
 }
 
 impl ComponentBuffer {
@@ -99,7 +98,7 @@ impl ComponentBuffer {
                 drop(item)
             },
             data: Vec::with_capacity(size_of::<T>() * capacity),
-            valid_offsets: Default::default(),
+            valid_indices: Default::default(),
         }
     }
 
@@ -108,27 +107,23 @@ impl ComponentBuffer {
     }
 
     pub fn get<T>(&self, index: usize) -> Option<&T> {
-        let offset = index * self.item_size;
-
-        if !self.valid_offsets.contains(&offset) {
+        if !self.valid_indices.contains(&index) {
             return None;
         }
 
         unsafe {
-            let ptr = self.data.as_ptr().add(offset) as *const T;
+            let ptr = self.data.as_ptr().cast::<T>().add(index);
             Some(&*ptr)
         }
     }
 
     pub fn get_mut<T>(&mut self, index: usize) -> Option<&mut T> {
-        let offset = index * self.item_size;
-
-        if !self.valid_offsets.contains(&offset) {
+        if !self.valid_indices.contains(&index) {
             return None;
         }
 
         unsafe {
-            let ptr = self.data.as_mut_ptr().add(offset) as *mut T;
+            let ptr = self.data.as_mut_ptr().cast::<T>().add(index);
             Some(&mut *ptr)
         }
     }
@@ -164,9 +159,8 @@ impl ComponentBuffer {
 
     pub fn insert<T>(&mut self, index: usize, value: T) -> Option<T> {
         let prev_value = {
-            let this = &mut *self;
-            if this.is_valid(index) {
-                let val = unsafe { this.get_unchecked::<T>(index).read() };
+            if self.is_valid(index) {
+                let val = unsafe { self.get_unchecked::<T>(index).read() };
                 Some(val)
             } else {
                 None
@@ -174,12 +168,12 @@ impl ComponentBuffer {
         };
 
         unsafe {
-            let ptr: *mut T = self.data.as_mut_ptr().cast();
+            let ptr: *mut T = self.data.as_mut_ptr().cast::<T>().add(index);
             ptr.write(value)
         };
 
         if prev_value.is_none() {
-            self.valid_offsets.insert(index * self.item_size);
+            self.valid_indices.insert(index);
         }
 
         prev_value
@@ -188,7 +182,7 @@ impl ComponentBuffer {
     pub fn remove<T>(&mut self, index: usize) -> Option<T> {
         if self.is_valid(index) {
             let val = unsafe { self.get_unchecked::<T>(index).read() };
-            self.valid_offsets.remove(&(index * self.item_size));
+            self.valid_indices.remove(&index);
             Some(val)
         } else {
             None
@@ -196,7 +190,6 @@ impl ComponentBuffer {
     }
 
     pub fn is_valid(&self, index: usize) -> bool {
-        let offset = index * self.item_size;
-        self.valid_offsets.contains(&offset)
+        self.valid_indices.contains(&index)
     }
 }

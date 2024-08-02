@@ -4,7 +4,11 @@ use std::{
     ptr::{self, NonNull},
 };
 
-use crate::resource::{Resource, ResourceId};
+use crate::{
+    component::Component,
+    entity::Entity,
+    resource::{Resource, ResourceId},
+};
 
 use super::World;
 
@@ -40,5 +44,19 @@ impl<'w> UnsafeWorldCell<'w> {
                 .get_mut(&R::id())
                 .map(|r| r.as_mut())
         }
+    }
+
+    pub fn component<C: Component>(self, entity: Entity) -> Option<&'w C> {
+        unsafe { self.unsafe_world().component(entity) }
+    }
+
+    pub fn component_mut<C: Component>(self, entity: Entity) -> Option<&'w mut C> {
+        unsafe { self.unsafe_world_mut().component_mut(entity) }
+    }
+
+    pub fn filter_entities(self, ids: &[ResourceId]) -> Vec<Entity> {
+        unsafe { self.unsafe_world() }
+            .components
+            .filter_entities(ids)
     }
 }

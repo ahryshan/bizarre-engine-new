@@ -14,7 +14,8 @@ pub struct ComponentRegistry {
     capacity: usize,
     lookup: BTreeMap<ResourceId, usize>,
     index_dumpster: VecDeque<usize>,
-    frozen_entities: Vec<Entity>,
+    entities: Vec<(Entity, u128)>,
+    component_bitmasks: Vec<u128>,
 }
 
 impl ComponentRegistry {
@@ -24,7 +25,8 @@ impl ComponentRegistry {
             capacity,
             lookup: Default::default(),
             index_dumpster: Default::default(),
-            frozen_entities: vec![Entity::from_gen_id(0, 0); capacity],
+            entities: vec![(Entity::from_gen_id(0, 0), 0); capacity],
+            component_bitmasks: vec![0; capacity],
         }
     }
 
@@ -39,10 +41,28 @@ impl ComponentRegistry {
             .iter_mut()
             .flatten()
             .for_each(|b| b.expand_by(by));
+
+        self.entities
+            .extend((0..by).map(|_| (Entity::from_gen_id(0, 0), 0)));
     }
 
     pub fn expand(&mut self) {
         self.expand_by(1);
+    }
+
+    pub fn register_entity(&mut self, entity: Entity) {
+        let (stored, bitmask) = &mut self.entities[entity.index()];
+        if entity.gen() > stored.gen() {
+            (*stored, *bitmask) = (entity, 0)
+        }
+    }
+
+    pub fn remove_entity(&mut self, entity: Entity) {
+        let (stored, bitmask) = &mut self.entities[entity.index()];
+        if *stored == entity {
+            stored.set_gen(0);
+            *bitmask = 0;
+        }
     }
 
     pub fn storage<T: Component>(&self) -> Option<&ComponentBuffer> {
@@ -85,10 +105,12 @@ impl ComponentRegistry {
         let new_storage = ComponentBuffer::with_capacity::<T>(self.capacity);
         let index = if let Some(index) = self.index_dumpster.pop_front() {
             self.storages[index] = Some(new_storage);
+            self.component_bitmasks[index] = 1 << index;
             index
         } else {
             let index = self.storages.len();
             self.storages.push(Some(new_storage));
+            self.component_bitmasks.push(1 << index);
             index
         };
 
@@ -100,7 +122,9 @@ impl ComponentRegistry {
             .index::<T>()
             .unwrap_or_else(|| panic!("Component `{}` is not registered", T::name()));
 
-        self.frozen_entities[entity.index()] = entity;
+        let (stored_entity, bitmask) = &mut self.entities[entity.index()];
+        *stored_entity = entity;
+        *bitmask |= self.component_bitmasks[index];
 
         self.storages[index]
             .as_mut()
@@ -109,7 +133,7 @@ impl ComponentRegistry {
     }
 
     pub fn remove<T: Component>(&mut self, entity: Entity) -> Option<T> {
-        if self.frozen_entities[entity.index()] != entity {
+        if self.entities[entity.index()].0 != entity {
             return None;
         }
 
@@ -129,8 +153,29 @@ impl ComponentRegistry {
         ret
     }
 
+    pub fn filter_entities(&self, ids: &[ResourceId]) -> Vec<Entity> {
+        let query_bitmask = ids.iter().fold(0u128, |acc, curr| {
+            let index = self
+                .index_by_id(curr)
+                .expect("Trying to filter entities using unregistered `ResourceId`");
+
+            acc | self.component_bitmasks[index]
+        });
+
+        self.entities
+            .iter()
+            .filter_map(|(entity, bitmask)| {
+                if bitmask & query_bitmask == query_bitmask {
+                    Some(*entity)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub fn has_entity(&self, entity: Entity) -> bool {
-        self.frozen_entities[entity.index()] == entity
+        self.entities[entity.index()].0 == entity
     }
 
     pub fn has_storage<T: Component>(&self) -> bool {
