@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 bizarre_memory = { version = "0.1.0", path = "../bizarre_memory" }
+bizarre_utils = { version = "0.1.0", path = "../bizarre_utils" }
 thiserror = { workspace = true }

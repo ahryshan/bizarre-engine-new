@@ -1,0 +1,7 @@
+[package]
+name = "bizarre_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bizarre_utils_proc_macro = { version = "0.1.0", path = "macros" }

@@ -1,123 +1,202 @@
 use std::{
-    any::TypeId,
-    collections::{btree_map, BTreeMap},
+    any::{type_name, TypeId},
+    collections::BTreeSet,
+    mem::MaybeUninit,
+    ptr::NonNull,
 };
 
-use error::{ResourceError, ResourceResult};
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ResourceId(TypeId);
 
-use crate::component::component_storage::{IntoStoredComponent, Storable, StoredComponent};
-
-pub mod error;
-pub mod resource_cmd;
-
-#[derive(Default)]
-pub struct Resources {
-    map: BTreeMap<TypeId, StoredComponent>,
-}
-
-/// A marker trait that must be implemented for all types used as resources
-pub trait Resource: Storable {}
-
-impl Resources {
-    pub fn new() -> Self {
-        Self::default()
+pub trait Resource
+where
+    Self: ResourceMarker + 'static,
+{
+    fn id() -> ResourceId {
+        ResourceId(TypeId::of::<Self>())
     }
 
-    pub fn insert<R: IntoStoredComponent + Resource>(&mut self, resource: R) -> ResourceResult {
-        let resource = resource.into_stored_component();
+    fn name() -> &'static str {
+        type_name::<Self>()
+    }
+}
 
-        if let btree_map::Entry::Vacant(e) = self.map.entry(resource.inner_type_id()) {
-            e.insert(resource);
-            Ok(())
+impl<T> Resource for T where T: ResourceMarker + 'static {}
+
+pub auto trait ResourceMarker {}
+impl !ResourceMarker for Stored {}
+
+pub struct Stored {
+    id: ResourceId,
+    name: &'static str,
+    data: NonNull<()>,
+}
+
+impl Stored {
+    pub fn from_storable<T: IntoStored>(value: T) -> Self {
+        value.into_stored()
+    }
+
+    pub unsafe fn as_ref<T>(&self) -> &T {
+        self.data.cast().as_ref()
+    }
+
+    pub unsafe fn as_mut<T>(&mut self) -> &mut T {
+        self.data.cast().as_mut()
+    }
+
+    pub unsafe fn into_inner<T>(self) -> T {
+        self.data.cast().read()
+    }
+
+    pub unsafe fn as_ptr_mut<T>(&mut self) -> *mut T {
+        self.data.cast().as_ptr()
+    }
+
+    pub unsafe fn as_ptr<T>(&self) -> *const T {
+        self.data.cast().as_ptr()
+    }
+}
+
+pub trait IntoStored {
+    fn into_stored(self) -> Stored;
+}
+
+impl<T: Resource> IntoStored for T {
+    fn into_stored(self) -> Stored {
+        Stored {
+            id: T::id(),
+            name: T::name(),
+            data: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self)).cast()) },
+        }
+    }
+}
+
+impl IntoStored for Stored {
+    fn into_stored(self) -> Stored {
+        self
+    }
+}
+
+pub struct ComponentBuffer {
+    id: ResourceId,
+    name: &'static str,
+    item_size: usize,
+    drop_fn: unsafe fn(NonNull<u8>),
+    data: Vec<MaybeUninit<u8>>,
+    /// Offsets in bytes to valid objects in buffer
+    valid_offsets: BTreeSet<usize>,
+}
+
+impl ComponentBuffer {
+    pub fn with_capacity<T: Resource>(capacity: usize) -> Self {
+        Self {
+            id: T::id(),
+            name: T::name(),
+            item_size: size_of::<T>(),
+            drop_fn: |item| {
+                let item: T = unsafe { item.cast().read() };
+                drop(item)
+            },
+            data: Vec::with_capacity(size_of::<T>() * capacity),
+            valid_offsets: Default::default(),
+        }
+    }
+
+    pub fn new<T: Resource>() -> Self {
+        Self::with_capacity::<T>(0)
+    }
+
+    pub fn get<T>(&self, index: usize) -> Option<&T> {
+        let offset = index * self.item_size;
+
+        if !self.valid_offsets.contains(&offset) {
+            return None;
+        }
+
+        unsafe {
+            let ptr = self.data.as_ptr().add(offset) as *const T;
+            Some(&*ptr)
+        }
+    }
+
+    pub fn get_mut<T>(&mut self, index: usize) -> Option<&mut T> {
+        let offset = index * self.item_size;
+
+        if !self.valid_offsets.contains(&offset) {
+            return None;
+        }
+
+        unsafe {
+            let ptr = self.data.as_mut_ptr().add(offset) as *mut T;
+            Some(&mut *ptr)
+        }
+    }
+
+    /// Returns pointer to the data at the provided index
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure that this buffer has appropriate len and it has initialized value on the
+    /// provided index
+    pub unsafe fn get_unchecked<T>(&self, index: usize) -> *const T {
+        self.data.as_ptr().cast::<T>().add(index)
+    }
+
+    /// Returns pointer to the data at the provided index
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure that this buffer has appropriate len and it has initialized value on the
+    /// provided index
+    pub unsafe fn get_mut_unchecked<T>(&mut self, index: usize) -> *const T {
+        self.data.as_mut_ptr().cast::<T>().add(index)
+    }
+
+    pub fn expand_by(&mut self, count: usize) {
+        self.data.reserve(self.item_size * count);
+        unsafe { self.data.set_len(self.data.len() + count * self.item_size) }
+    }
+
+    pub fn expand(&mut self) {
+        self.expand_by(1)
+    }
+
+    pub fn insert<T>(&mut self, index: usize, value: T) -> Option<T> {
+        let prev_value = {
+            let this = &mut *self;
+            if this.is_valid(index) {
+                let val = unsafe { this.get_unchecked::<T>(index).read() };
+                Some(val)
+            } else {
+                None
+            }
+        };
+
+        unsafe {
+            let ptr: *mut T = self.data.as_mut_ptr().cast();
+            ptr.write(value)
+        };
+
+        if prev_value.is_none() {
+            self.valid_offsets.insert(index * self.item_size);
+        }
+
+        prev_value
+    }
+
+    pub fn remove<T>(&mut self, index: usize) -> Option<T> {
+        if self.is_valid(index) {
+            let val = unsafe { self.get_unchecked::<T>(index).read() };
+            self.valid_offsets.remove(&(index * self.item_size));
+            Some(val)
         } else {
-            Err(ResourceError::AlreadyPresent(resource.component_name()))
+            None
         }
     }
 
-    pub fn get<R: Resource>(&self) -> ResourceResult<&R> {
-        match self.map.get(&R::inner_type_id()) {
-            Some(r) => Ok(r.downcast_ref().unwrap()),
-            None => Err(ResourceError::NotPresent(R::inner_type_name())),
-        }
-    }
-
-    pub fn get_mut<R: Resource>(&self) -> ResourceResult<&mut R> {
-        match self.map.get(&R::inner_type_id()) {
-            Some(r) => Ok(r.downcast_mut().unwrap()),
-            None => Err(ResourceError::NotPresent(R::inner_type_name())),
-        }
-    }
-
-    pub fn remove<R: Resource>(&mut self) -> Option<R> {
-        self.map
-            .remove(&R::inner_type_id())
-            .map(|r| unsafe { r.into_inner() })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use anyhow::{anyhow, Result};
-
-    use crate::test_commons::Motd;
-
-    use super::{error::ResourceError, Resources};
-
-    #[test]
-    fn should_insert_resource() -> Result<()> {
-        let mut storage = Resources::new();
-
-        storage.insert(Motd("Hello, World!"))?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn should_err_on_double_insert() -> Result<()> {
-        let mut storage = Resources::new();
-
-        storage.insert(Motd("Hello, World!"))?;
-        match storage.insert(Motd("Hello, World!")) {
-            Err(ResourceError::AlreadyPresent(_)) => Ok(()),
-            _ => Err(anyhow!(
-                "Expected resource storage to prevent double insert"
-            )),
-        }
-    }
-
-    #[test]
-    fn should_get_resource() -> Result<()> {
-        let mut storage = Resources::new();
-        storage.insert(Motd("Hello, World!"))?;
-
-        let health = storage.get::<Motd>()?;
-
-        assert!(health == &Motd("Hello, World!"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn should_get_resource_mut() -> Result<()> {
-        let mut r = Resources::new();
-        r.insert(Motd("hello world"))?;
-
-        let motd = r.get_mut::<Motd>()?;
-
-        motd.0 = "Hello, World!";
-        let cloned = motd.clone();
-
-        let health = r.get::<Motd>()?;
-
-        assert!(health == &cloned);
-
-        Ok(())
-    }
-
-    #[test]
-    #[should_panic]
-    fn should_not_get_nonexistent_resource() {
-        let r = Resources::new();
-        r.get::<Motd>().unwrap();
+    pub fn is_valid(&self, index: usize) -> bool {
+        let offset = index * self.item_size;
+        self.valid_offsets.contains(&offset)
     }
 }

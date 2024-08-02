@@ -1,360 +1,242 @@
-use std::{
-    any::TypeId,
-    collections::{BTreeMap, VecDeque},
+use std::collections::{BTreeMap, VecDeque};
+
+use crate::{
+    entity::Entity,
+    resource::{ComponentBuffer, Resource, ResourceId},
 };
 
-use component_storage::{ComponentStorage, IntoStoredComponent, Storable, StoredComponent};
-use error::{ComponentError, ComponentResult};
+pub trait Component: Resource {}
 
-use crate::entity::Entity;
+impl<T: Resource> Component for T {}
 
-pub mod component_cmd;
-pub mod component_storage;
-pub mod error;
-
-/// A marker trait that must be implemented for all types used as components
-pub trait Component: Storable {}
-
-/// Type for storing all registered and added components inside a [`World`](crate::world::World).
-#[derive(Default)]
-pub struct Components {
-    lookup: BTreeMap<TypeId, usize>,
-    storages: Vec<ComponentStorage>,
-    bitmasks: Vec<u128>,
-    entity_bitmasks: Vec<(Entity, u128)>,
-    storage_capacity: usize,
-    id_dumpster: VecDeque<usize>,
+pub struct ComponentRegistry {
+    storages: Vec<Option<ComponentBuffer>>,
+    capacity: usize,
+    lookup: BTreeMap<ResourceId, usize>,
+    index_dumpster: VecDeque<usize>,
+    frozen_entities: Vec<Entity>,
 }
 
-impl Components {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn insert<C: IntoStoredComponent>(
-        &mut self,
-        entity: Entity,
-        component: C,
-    ) -> ComponentResult {
-        let component = component.into_stored_component();
-        let index = self.get_index_raw(component.inner_type_id(), component.component_name())?;
-        self.storages[index].insert(entity, component)?;
-
-        let (stored_entity, stored_bitmask) = self.entity_bitmasks[entity.index()];
-
-        let pair = if stored_entity == entity {
-            (entity, stored_bitmask | self.bitmasks[index])
-        } else {
-            (entity, self.bitmasks[index])
-        };
-
-        self.entity_bitmasks[entity.index()] = pair;
-
-        Ok(())
-    }
-
-    pub fn get<C: Component>(&self, entity: Entity) -> ComponentResult<&C> {
-        let index = self.get_index::<C>()?;
-
-        self.storages[index].get(entity)
-    }
-
-    pub fn get_mut<C: Component>(&self, entity: Entity) -> ComponentResult<&mut C> {
-        let index = self.get_index::<C>()?;
-        self.storages[index].get_mut(entity)
-    }
-
-    /// Removes a component for the entity returning the value if the component was previously
-    /// assigned for entity
-    pub fn remove<C: Component>(&mut self, entity: Entity) -> Option<C> {
-        let index = self.get_index::<C>().ok()?;
-
-        let component = self.storages[index].remove::<C>(entity);
-        self.entity_bitmasks[entity.index()].1 ^= self.bitmasks[index];
-        component
-    }
-
-    pub fn remove_entity(&mut self, mut entity: Entity) {
-        for storage in self.storages.iter_mut() {
-            storage.forget_entity(entity);
+impl ComponentRegistry {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            storages: Default::default(),
+            capacity,
+            lookup: Default::default(),
+            index_dumpster: Default::default(),
+            frozen_entities: vec![Entity::from_gen_id(0, 0); capacity],
         }
-        entity.clear_gen();
-        self.entity_bitmasks[entity.index()] = (entity, 0);
     }
 
-    pub fn get_storage<C: Component>(&self) -> ComponentResult<&ComponentStorage> {
-        let index = self.get_index::<C>()?;
-        Ok(&self.storages[index])
+    pub fn new() -> Self {
+        Self::with_capacity(0)
     }
 
-    pub fn get_storage_mut<C: Component>(&mut self) -> ComponentResult<&mut ComponentStorage> {
-        let index = self.get_index::<C>()?;
-        Ok(&mut self.storages[index])
+    pub fn expand_by(&mut self, by: usize) {
+        self.capacity += by;
+
+        self.storages
+            .iter_mut()
+            .flatten()
+            .for_each(|b| b.expand_by(by));
     }
 
-    /// Expands all underlying storages by 1
     pub fn expand(&mut self) {
         self.expand_by(1);
     }
 
-    /// Expands all underlying storages by number provided
-    pub fn expand_by(&mut self, by: usize) {
-        self.storage_capacity += by;
-        self.entity_bitmasks.push((Entity::from_gen_id(0, 1), 0));
+    pub fn storage<T: Component>(&self) -> Option<&ComponentBuffer> {
+        let index = self.index::<T>()?;
 
-        for storage in self.storages.iter_mut() {
-            storage.expand_by(by)
+        self.storages[index].as_ref()
+    }
+
+    pub fn storage_mut<T: Component>(&mut self) -> Option<&mut ComponentBuffer> {
+        let index = self.index::<T>()?;
+
+        self.storages[index].as_mut()
+    }
+
+    pub fn component<T: Component>(&self, entity: Entity) -> Option<&T> {
+        if !self.has_entity(entity) {
+            return None;
         }
+
+        let storage = self.storage::<T>()?;
+
+        storage.get(entity.index())
     }
 
-    /// Registers a component of type `C` with this `Components`
-    ///
-    /// If there it's possible will reuse some old index for the newly created
-    /// [`ComponentStorage`], but if there is a `ComponentStorage` already present for the
-    /// component, this function will do nothing
-    ///
-    pub fn register<C: Component>(&mut self) {
-        self.register_raw(C::inner_type_id(), C::inner_type_name())
+    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
+        if !self.has_entity(entity) {
+            return None;
+        }
+
+        let storage = self.storage_mut::<T>()?;
+
+        storage.get_mut(entity.index())
     }
 
-    pub fn register_raw(&mut self, type_id: TypeId, name: &'static str) {
-        if self.get_index_raw(type_id, name).is_ok() {
+    pub fn register<T: Component>(&mut self) {
+        if self.index::<T>().is_some() {
             return;
         }
 
-        if let Some(index) = self.id_dumpster.pop_front() {
-            self.storages[index] =
-                ComponentStorage::with_capacity_raw(type_id, name, self.storage_capacity);
-            self.bitmasks[index] = 1 << index;
-            self.lookup.insert(type_id, index);
-        } else {
-            let index = self.storages.len();
-
-            self.storages.push(ComponentStorage::with_capacity_raw(
-                type_id,
-                name,
-                self.storage_capacity,
-            ));
-            self.bitmasks.push(1 << index);
-
-            self.lookup.insert(type_id, index);
-        }
-    }
-
-    /// Removes a storage from the `Components`.
-    ///
-    /// Note that the storage won't be removed physically from the `Components`, but it's just
-    /// will be 'forgotten', making it unaccessible for new queries and [`Components::get_storage`] or [Components::get_storage_mut]
-    /// but it will be possible to get access to the underlying data through raw pointers, created before the
-    /// `remove_storage` call. The removed storage data will still be present in the memory
-    /// location until it gets reused for a new storage.
-    ///
-    /// If there is no storage for the `C` to begin with, it won't do anything
-    ///
-    pub fn unregister<C: Component>(&mut self) {
-        let index = if let Ok(index) = self.get_index::<C>() {
+        let new_storage = ComponentBuffer::with_capacity::<T>(self.capacity);
+        let index = if let Some(index) = self.index_dumpster.pop_front() {
+            self.storages[index] = Some(new_storage);
             index
         } else {
-            return;
+            let index = self.storages.len();
+            self.storages.push(Some(new_storage));
+            index
         };
 
-        self.id_dumpster.push_back(index);
-        self.lookup.remove(&C::inner_type_id());
+        self.lookup.insert(T::id(), index);
     }
 
-    /// Gets index of the storage for components of type `C` if such exists in this `Components`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [ComponentError::NotPresentStorage] if there is no storage for the `C`
-    #[inline(always)]
-    fn get_index<C: Component>(&self) -> ComponentResult<usize> {
-        self.lookup
-            .get(&C::inner_type_id())
-            .copied()
-            .ok_or(ComponentError::NotPresentStorage(C::inner_type_name()))
+    pub fn insert<T: Component>(&mut self, entity: Entity, component: T) -> Option<T> {
+        let index = self
+            .index::<T>()
+            .unwrap_or_else(|| panic!("Component `{}` is not registered", T::name()));
+
+        self.frozen_entities[entity.index()] = entity;
+
+        self.storages[index]
+            .as_mut()
+            .unwrap()
+            .insert(entity.index(), component)
     }
 
-    /// Does the same as [`Components::get_index`] but instead of generic component it must get
-    /// `type_id` and `component_name` of the underlying `Component`
-    #[inline]
-    fn get_index_raw(&self, type_id: TypeId, name: &'static str) -> ComponentResult<usize> {
-        self.lookup
-            .get(&type_id)
-            .copied()
-            .ok_or(ComponentError::NotPresentStorage(name))
+    pub fn remove<T: Component>(&mut self, entity: Entity) -> Option<T> {
+        if self.frozen_entities[entity.index()] != entity {
+            return None;
+        }
+
+        let index = self.index::<T>()?;
+
+        self.storages[index]
+            .as_mut()
+            .unwrap()
+            .remove::<T>(entity.index())
     }
 
-    pub fn filter_entities(&self, type_ids: &[TypeId]) -> Vec<Entity> {
-        let bitmask = type_ids.iter().fold(0, |acc, tid| {
-            let comp_mask = self
-                .lookup
-                .get(tid)
-                .map(|index| self.bitmasks[*index])
-                .unwrap_or(0);
+    pub fn remove_storage<T: Component>(&mut self) -> Option<ComponentBuffer> {
+        let index = self.index::<T>()?;
 
-            acc | comp_mask
-        });
+        let ret = self.storages[index].take();
+        self.lookup.remove(&T::id());
+        ret
+    }
 
-        self.entity_bitmasks
-            .iter()
-            .filter_map(|(e, b)| {
-                if b & bitmask == bitmask {
-                    Some(*e)
-                } else {
-                    None
-                }
-            })
-            .collect()
+    pub fn has_entity(&self, entity: Entity) -> bool {
+        self.frozen_entities[entity.index()] == entity
+    }
+
+    pub fn has_storage<T: Component>(&self) -> bool {
+        self.index::<T>().is_some()
+    }
+
+    pub fn has_storage_for_id(&self, id: &ResourceId) -> bool {
+        self.index_by_id(id).is_some()
+    }
+
+    pub fn has_component<T: Component>(&self) -> bool {
+        self.index::<T>().is_some()
+    }
+
+    pub fn has_component_by_id(&self, id: &ResourceId) -> bool {
+        self.index_by_id(id).is_some()
+    }
+
+    pub fn has_component_for_entity<T: Component>(&self, entity: Entity) -> bool {
+        self.has_entity(entity)
+            && self
+                .storage::<T>()
+                .map(|s| s.is_valid(entity.index()))
+                .unwrap_or(false)
+    }
+
+    pub fn has_component_for_entity_by_id(&self, entity: Entity, id: &ResourceId) -> bool {
+        let index = self.index_by_id(id);
+        if index.is_none() {
+            return false;
+        }
+
+        let index = index.unwrap();
+
+        self.has_entity(entity)
+            && self.storages[index]
+                .as_ref()
+                .map(|s| s.is_valid(entity.index()))
+                .unwrap_or(false)
+    }
+
+    fn index_by_id(&self, id: &ResourceId) -> Option<usize> {
+        self.lookup.get(id).copied()
+    }
+
+    fn index<T: Component>(&self) -> Option<usize> {
+        self.lookup.get(&T::id()).copied()
     }
 }
 
-impl Components {
-    /// # Safety
-    ///
-    /// The `Components` instance must have a storage for the `C` type provided
-    ///
-    /// # Panics
-    ///
-    /// Absence of a storage for type `C` will result in panic
-    pub unsafe fn get_index_unchecked<C: Component>(&self) -> usize {
-        self.lookup[&C::inner_type_id()]
-    }
-
-    /// # Safety
-    ///
-    /// The `Components` instance must have a storage for the `C` type provided
-    ///
-    /// # Panics
-    ///
-    /// Absence of a storage for type `C` will result in panic
-    pub unsafe fn get_storage_unchecked<C: Component>(&self) -> &ComponentStorage {
-        let index = self.get_index_unchecked::<C>();
-        &self.storages[index]
-    }
-
-    /// # Safety
-    ///
-    /// The `Components` instance must have a storage for the `C` type provided
-    ///
-    /// # Panics
-    ///
-    /// Absence of a storage for type `C` will result in panic
-    pub unsafe fn get_storage_mut_unchecked<C: Component>(&mut self) -> &mut ComponentStorage {
-        let index = self.get_index_unchecked::<C>();
-        &mut self.storages[index]
+impl Default for ComponentRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::any::TypeId;
+mod test {
 
-    use anyhow::Result;
+    use crate::entity::Entity;
 
-    use crate::{
-        component::{component_storage::Storable, Component},
-        entity::Entity,
-        test_commons::Health,
-    };
+    use super::ComponentRegistry;
 
-    use super::Components;
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct Health(pub u32);
 
-    #[test]
-    fn should_register_component() {
-        let mut components = Components::new();
-        components.register::<Health>();
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct Mana(pub u32);
 
-        assert!(components.storages.len() == 1);
-        assert!(components.lookup.get(&TypeId::of::<Health>()) == Some(0).as_ref());
-        assert!(components.storages[0].capacity() == 0);
-        assert!(components.storages[0].occupied() == 0);
-        assert!(components.bitmasks[0] == 1);
-    }
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct Name(pub &'static str);
 
     #[test]
-    fn should_unregister_component() {
-        let mut components = Components::new();
-        components.register::<Health>();
-        components.unregister::<Health>();
-
-        assert!(!components.lookup.contains_key(&Health::inner_type_id()));
-    }
-
-    #[test]
-    fn should_expand() {
-        let mut components = Components::new();
-
-        assert!(components.storage_capacity == 0);
-
-        components.expand();
-
-        assert!(components.storage_capacity == 1);
-
-        components.expand_by(9);
-
-        assert!(components.storage_capacity == 10);
-    }
-
-    #[test]
-    fn should_insert_component() -> Result<()> {
-        let mut components = Components::new();
-
-        components.expand();
-        components.register::<Health>();
-
+    #[should_panic]
+    pub fn should_panic_on_unregistered_insert() {
+        let mut components = ComponentRegistry::new();
         let entity = Entity::from_gen_id(1, 0);
-
-        components.insert(entity, Health(100))?;
-
-        assert!(components.storages[0].capacity() == 1);
-        assert!(components.storages[0].occupied() == 1);
-        assert!(components.entity_bitmasks[0].1 == 1);
-
-        Ok(())
+        components.insert(entity, Health(100));
     }
 
     #[test]
-    fn should_get_component() -> Result<()> {
-        let mut storage = Components::new();
+    pub fn should_register_components() {
+        let mut c = ComponentRegistry::new();
+        c.register::<Health>();
+        c.register::<Mana>();
+        c.register::<Name>();
 
-        storage.expand();
-        storage.register::<Health>();
-
-        let entity = Entity::from_gen_id(1, 0);
-
-        storage.insert(entity, Health(100))?;
-
-        let health: &Health = storage.get(entity)?;
-
-        assert!(health == &Health(100));
-
-        let cloned = health.clone();
-
-        let health_mut: &mut Health = storage.get_mut(entity)?;
-
-        assert!(&cloned == health_mut);
-
-        Ok(())
+        assert!(c.capacity == 0);
+        assert!(c.storages.len() == 3);
     }
 
     #[test]
-    fn should_remove_entity() -> Result<()> {
-        let mut storage = Components::new();
-        storage.expand();
-        storage.register::<Health>();
+    pub fn should_insert_components() {
+        let mut c = ComponentRegistry::with_capacity(3);
+        let entity_0 = Entity::from_gen_id(1, 0);
 
-        let entity = Entity::from_gen_id(1, 0);
+        c.register::<Health>();
+        c.register::<Mana>();
+        c.register::<Name>();
 
-        storage.insert(entity, Health(100))?;
+        if c.insert(entity_0, Health(100)).is_some() {
+            panic!("There must be no Health for {entity_0:?}");
+        };
 
-        storage.remove_entity(entity);
-
-        assert!(storage.storages[0].capacity() == 1);
-        assert!(storage.storages[0].occupied() == 0);
-        assert!(storage.entity_bitmasks[0].1 == 0);
-        assert!(!storage.storages[0].has_entity(entity));
-
-        Ok(())
+        assert!(c.has_entity(entity_0));
+        assert!(c.has_component_for_entity::<Health>(entity_0));
+        assert!(c.component(entity_0) == Some(&Health(100)));
     }
 }

@@ -1,11 +1,4 @@
-use std::{fmt::Debug, ptr::NonNull};
-
-use crate::{query::query_element::QueryElement, world::World};
-
-pub mod builder;
-pub mod entities;
-pub mod entity_commands;
-pub mod error;
+use std::fmt::Debug;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Hash, Clone, Copy)]
 pub struct Entity {
@@ -55,19 +48,3 @@ impl Debug for Entity {
     }
 }
 
-impl QueryElement for Entity {
-    type Item<'a> = Entity;
-
-    fn inner_type_id() -> Option<std::any::TypeId> {
-        None
-    }
-
-    fn get_item<'a>(_: &'a World, entity: Entity) -> Self::Item<'a> {
-        entity
-    }
-
-    fn is_non_component() -> bool {
-        // False, because entity query is dependant on queried components
-        false
-    }
-}

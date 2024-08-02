@@ -8,7 +8,7 @@ members = [
     "crates/bizarre_engine",
     "crates/bizarre_core",
     "crates/bizarre_ecs",
-    "crates/bizarre_memory",
+    "crates/bizarre_memory", "crates/bizarre_utils",
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 

@@ -1,162 +1,80 @@
-use std::ptr::NonNull;
+use system_param::SystemParam;
 
-use crate::{
-    query::{query_data::QueryData, Query},
-    world::{command_queue::CommandQueue, commands::Commands, World},
-};
+use crate::world::unsafe_world_cell::UnsafeWorldCell;
 
-pub mod error;
-pub mod schedule;
+pub mod functional_system;
 pub mod system_graph;
+pub mod system_param;
 
 pub trait System {
-    type InitData: QueryData = ();
-    type RunData: QueryData = ();
-    type DisposeData: QueryData = ();
+    fn run(&mut self, world: UnsafeWorldCell);
 
-    fn init(&mut self, query: Query<'_, Self::InitData>, commands: &mut Commands) {
-        let _ = commands;
-        let _ = query;
-    }
-    fn run(&mut self, query: Query<'_, Self::RunData>, commands: &mut Commands);
-    fn dispose(&mut self, query: Query<'_, Self::DisposeData>, commands: &mut Commands) {
-        let _ = commands;
-        let _ = query;
-    }
+    fn init(&mut self, world: UnsafeWorldCell);
+
+    fn is_init(&self) -> bool;
+
+    fn name_static() -> &'static str
+    where
+        Self: Sized;
+
+    fn name(&self) -> &'static str;
 }
 
-type InitFn = unsafe fn(NonNull<()>, NonNull<World>) -> CommandQueue;
-type RunFn = unsafe fn(NonNull<()>, NonNull<World>) -> CommandQueue;
-type DisposeFn = unsafe fn(NonNull<()>, NonNull<World>) -> CommandQueue;
-type DropFn = unsafe fn(NonNull<()>);
+pub trait IntoSystem<Marker> {
+    type System: System + 'static;
 
-pub struct StoredSystem {
-    state: NonNull<()>,
-    init_fn: InitFn,
-    run_fn: RunFn,
-    dispose_fn: DisposeFn,
-    drop_fn: DropFn,
-}
-
-impl StoredSystem {
-    pub fn init(&mut self, world: &World) -> CommandQueue {
-        unsafe { (self.init_fn)(self.state, world.into()) }
-    }
-
-    pub fn run(&mut self, world: &World) -> CommandQueue {
-        unsafe { (self.run_fn)(self.state, world.into()) }
-    }
-
-    pub fn dispose(&mut self, world: &World) -> CommandQueue {
-        unsafe { (self.dispose_fn)(self.state, world.into()) }
-    }
-}
-
-impl Drop for StoredSystem {
-    fn drop(&mut self) {
-        unsafe { (self.drop_fn)(self.state) }
-    }
-}
-
-pub trait IntoStoredSystem {
-    fn into_stored_system(self) -> StoredSystem;
-}
-
-impl<T> IntoStoredSystem for T
-where
-    T: System,
-{
-    fn into_stored_system(self) -> StoredSystem {
-        StoredSystem {
-            state: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self)).cast()) },
-            init_fn: |state, mut world| {
-                let (state, world) = unsafe { (state.cast().as_mut(), world.as_mut()) };
-                let query = world.query();
-                let mut commands = Commands::default();
-
-                Self::init(state, query, &mut commands);
-
-                commands.into_queue()
-            },
-            run_fn: |state, mut world| {
-                let (state, world) = unsafe { (state.cast().as_mut(), world.as_mut()) };
-                let query = world.query();
-                let mut commands = Commands::default();
-
-                Self::run(state, query, &mut commands);
-
-                commands.into_queue()
-            },
-            dispose_fn: |state, mut world| {
-                let (state, world) = unsafe { (state.cast().as_mut(), world.as_mut()) };
-                let query = world.query();
-                let mut commands = Commands::default();
-
-                Self::dispose(state, query, &mut commands);
-
-                commands.into_queue()
-            },
-
-            drop_fn: |state| {
-                let state: Self = unsafe { state.cast().read_unaligned() };
-                drop(state)
-            },
-        }
-    }
+    fn into_system(self) -> Self::System;
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        query::{fetch::Fetch, Query},
-        test_commons::{Health, Mana},
-        world::{commands::Commands, World},
+        system::{
+            system_graph::SystemGraph,
+            system_param::{Local, Res, ResMut},
+            IntoSystem,
+        },
+        world::World,
     };
 
-    use super::{IntoStoredSystem, System};
+    struct DeltaTime(pub f64);
 
-    struct HelloWorldSystem {
-        healthy_entities: usize,
-    }
-
-    impl System for HelloWorldSystem {
-        type RunData<'a> = Fetch<'a, Health>;
-
-        fn run<'q>(&mut self, query: Query<'q, Self::RunData>, _: &mut Commands) {
-            let count = query.into_iter().filter(|h| h.0 > 50).count();
-
-            self.healthy_entities += count;
-
-            println!(
-                "Hello world! Today we've met {count} healthy entities! ({} overall)",
-                self.healthy_entities
-            );
+    #[test]
+    fn types_should_work() {
+        fn system(delta: Res<DeltaTime>, delta_mut: ResMut<DeltaTime>) {
+            let _ = delta;
+            let _ = delta_mut;
         }
+
+        fn use_system<Marker>(system: impl IntoSystem<Marker>) {
+            let _ = system;
+        }
+
+        use_system(system)
     }
 
     #[test]
-    fn should_store_and_run_system() {
+    fn should_run_system() {
+        fn delta_time_system(delta: Res<DeltaTime>, mut time_counter: Local<f64>) {
+            *time_counter += delta.0;
+            println!("Frame time: {}s, runtime: {}s", delta.0, *time_counter);
+        }
+
         let mut world = World::new();
 
-        world.spawn().with_component(Health(100)).build();
-        world.spawn().with_component(Health(50)).build();
-        world.spawn().with_component(Health(200)).build();
-        world.spawn().with_component(Mana(100)).build();
+        world.insert_resource(DeltaTime(0.16));
 
-        let stored = HelloWorldSystem {
-            healthy_entities: 0,
-        }
-        .into_stored_system();
+        let mut sg = SystemGraph::new();
 
-        stored.run(&world);
-        stored.run(&world);
-        stored.run(&world);
-        stored.run(&world);
-        stored.run(&world);
+        sg.add_system(delta_time_system);
 
-        unsafe {
-            let cast = &*stored.state.cast::<HelloWorldSystem>();
-            assert!(cast.healthy_entities == 10)
-        }
+        sg.iter().for_each(|s| println!("System: {}", s.name()));
+
+        sg.init_systems(&world);
+        sg.run_systems(&mut world);
+        sg.run_systems(&mut world);
+        sg.run_systems(&mut world);
+        sg.run_systems(&mut world);
+        sg.run_systems(&mut world);
     }
 }
