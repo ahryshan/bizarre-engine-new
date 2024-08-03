@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, ptr::NonNull};
+use std::ptr::NonNull;
 
 use bizarre_utils::mass_impl;
 
@@ -24,6 +24,24 @@ pub trait IntoResourceBatch {
 impl IntoResourceBatch for () {
     unsafe fn into_resource_batch(self) -> ResourceBatch {
         ResourceBatch { data: vec![] }
+    }
+}
+
+impl<T> IntoResourceBatch for T
+where
+    T: Resource,
+{
+    unsafe fn into_resource_batch(self) -> ResourceBatch {
+        let packed = Packed {
+            meta: ResourceMeta::new::<T>(),
+            value: self,
+        };
+
+        let mut data = vec![0; size_of::<Packed<T>>()];
+
+        data.as_mut_ptr().cast::<Packed<T>>().write(packed);
+
+        ResourceBatch { data }
     }
 }
 

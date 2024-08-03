@@ -1,12 +1,16 @@
 use std::{any::type_name, marker::PhantomData};
 
+use bitflags::Flags;
 use bizarre_utils::mass_impl;
 
-use crate::world::unsafe_world_cell::UnsafeWorldCell;
+use crate::{
+    commands::command_buffer::CommandBuffer,
+    world::{unsafe_world_cell::UnsafeWorldCell, World},
+};
 
 use super::{
     system_param::{SystemParamItem, SystemParamState},
-    IntoSystem, System, SystemParam,
+    IntoSystem, System, SystemMeta, SystemParam, WorldAccess, WorldAccessType,
 };
 
 pub trait FnSys<Marker> {
@@ -21,6 +25,7 @@ where
 {
     func: F,
     init: bool,
+    meta: SystemMeta,
     param_state: Option<SystemParamState<F::Param>>,
     _phantom: PhantomData<Marker>,
 }
@@ -48,7 +53,24 @@ where
     }
 
     fn name(&self) -> &'static str {
-        Self::name_static()
+        self.meta.name
+    }
+
+    fn system_access(&self) -> &[super::WorldAccess] {
+        &self.meta.access
+    }
+
+    fn apply_deferred(&mut self, world: &mut World) {
+        self.take_deferred().apply(world);
+    }
+
+    fn take_deferred(&mut self) -> CommandBuffer {
+        F::Param::take_deferred(self.param_state.as_mut().unwrap())
+            .into_iter()
+            .fold(CommandBuffer::new(), |mut acc, mut curr| {
+                acc.append(&mut curr);
+                acc
+            })
     }
 }
 
@@ -60,12 +82,72 @@ where
     type System = FunctionalSystem<Marker, F>;
 
     fn into_system(self) -> Self::System {
+        let meta = SystemMeta {
+            name: type_name::<F>(),
+            access: F::Param::param_access().into(),
+        };
+
+        #[cfg(debug_assertions)]
+        {
+            if let Some(conflicts) = get_internal_conflicts(&meta.access) {
+                let msg = conflicts.into_iter().enumerate().fold(
+                    format!(
+                        "Failed to build system `{}`, found access conflicts:\n",
+                        meta.name
+                    ),
+                    |acc, (num, msg)| format!("{acc}\t{}. {}\n", num + 1, msg),
+                );
+                panic!("{msg}");
+            }
+        }
+
         Self::System {
             func: self,
+            meta,
             init: false,
             param_state: None,
             _phantom: PhantomData,
         }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn get_internal_conflicts(access: &[WorldAccess]) -> Option<Vec<String>> {
+    let internal_conflicts = access
+        .chunk_by(|a, b| {
+            a.resource_id == b.resource_id
+                && a.access_type & WorldAccessType::ResourceMask
+                    == b.access_type & WorldAccessType::ResourceMask
+        })
+        .filter_map(|chunk| {
+            if chunk.len() < 2 {
+                return None;
+            }
+            let reads = chunk
+                .iter()
+                .filter(|a| a.access_type.intersects(WorldAccessType::Read))
+                .cloned()
+                .collect::<Vec<_>>();
+            let writes = chunk
+                .iter()
+                .filter(|a| a.access_type.intersects(WorldAccessType::Write))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            if writes.len() > 1 {
+                Some(format!("multiple {}", writes[0]))
+            } else if !writes.is_empty() && !reads.is_empty() {
+                Some(format!("{} while accessing it immutably", writes[0]))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if !internal_conflicts.is_empty() {
+        Some(internal_conflicts)
+    } else {
+        None
     }
 }
 
@@ -94,3 +176,50 @@ macro_rules! impl_fn_sys {
 }
 
 mass_impl!(impl_fn_sys, 16, F);
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        prelude::*,
+        query::Query,
+        system::system_param::{Res, ResMut},
+    };
+
+    #[derive(Resource)]
+    struct Res1;
+
+    #[derive(Component)]
+    struct Comp1;
+
+    fn multiple_mutable_res(_: ResMut<Res1>, _: ResMut<Res1>) {}
+
+    fn multiple_mutable_query(_: Query<(&mut Comp1, &mut Comp1)>) {}
+
+    fn mut_and_ref_res(_: Res<Res1>, _: ResMut<Res1>) {}
+
+    fn mut_and_ref_query(_: Query<(&mut Comp1, &Comp1)>) {}
+
+    #[test]
+    #[should_panic]
+    fn should_panic_on_multiple_mutable_access() {
+        multiple_mutable_res.into_system();
+    }
+
+    #[test]
+    #[should_panic]
+    fn should_panic_on_multiple_mutable_query_access() {
+        multiple_mutable_query.into_system();
+    }
+
+    #[test]
+    #[should_panic]
+    fn should_panic_on_mut_and_ref_resource_access() {
+        mut_and_ref_res.into_system();
+    }
+
+    #[test]
+    #[should_panic]
+    fn should_panic_on_mut_and_ref_query_access() {
+        mut_and_ref_query.into_system();
+    }
+}

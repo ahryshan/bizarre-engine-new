@@ -10,3 +10,4 @@ thiserror = { workspace = true }
 bizarre_ecs_proc_macro = { version = "0.1.0", path = "macros" }
 bizarre_memory = { version = "0.1.0", path = "../bizarre_memory" }
 bizarre_utils = { version = "0.1.0", path = "../bizarre_utils" }
+bitflags = "2.6.0"

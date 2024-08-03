@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
-    sync::atomic::{self, AtomicU64, AtomicUsize},
+    sync::atomic::{self, AtomicU64},
 };
 
 use crate::query::query_element::QueryData;
@@ -66,6 +66,10 @@ impl QueryData for Entity {
         entity: Entity,
     ) -> Self::Item<'_> {
         entity
+    }
+
+    fn query_access() -> Vec<crate::system::WorldAccess> {
+        vec![]
     }
 }
 

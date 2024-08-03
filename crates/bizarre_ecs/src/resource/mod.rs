@@ -5,6 +5,8 @@ use std::{
     ptr::NonNull,
 };
 
+pub use bizarre_ecs_proc_macro::Resource;
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResourceId(TypeId);
 
@@ -22,6 +24,7 @@ pub struct ResourceMeta {
     pub name: &'static str,
     pub id: ResourceId,
     pub size: usize,
+    pub drop_fn: unsafe fn(NonNull<u8>),
 }
 
 impl ResourceMeta {
@@ -30,6 +33,11 @@ impl ResourceMeta {
             name: T::name(),
             id: T::id(),
             size: size_of::<T>(),
+            drop_fn: |ptr| {
+                let ptr = ptr.cast::<T>();
+                let value = unsafe { ptr.read() };
+                drop(value)
+            },
         }
     }
 }
@@ -38,6 +46,7 @@ pub struct StoredResource {
     pub(crate) id: ResourceId,
     pub(crate) name: &'static str,
     pub(crate) data: NonNull<u8>,
+    pub(crate) drop_fn: unsafe fn(NonNull<u8>),
 }
 
 impl StoredResource {
@@ -46,9 +55,16 @@ impl StoredResource {
     }
 
     pub unsafe fn from_meta_and_data(meta: ResourceMeta, data: NonNull<u8>) -> Self {
-        let ResourceMeta { name, id, .. } = meta;
+        let ResourceMeta {
+            name, id, drop_fn, ..
+        } = meta;
 
-        Self { name, id, data }
+        Self {
+            name,
+            id,
+            data,
+            drop_fn,
+        }
     }
 
     pub unsafe fn as_ref<T>(&self) -> &T {
@@ -72,6 +88,12 @@ impl StoredResource {
     }
 }
 
+impl Drop for StoredResource {
+    fn drop(&mut self) {
+        unsafe { (self.drop_fn)(self.data) }
+    }
+}
+
 pub trait IntoStored {
     fn into_stored(self) -> StoredResource;
 }
@@ -82,6 +104,11 @@ impl<T: Resource> IntoStored for T {
             id: T::id(),
             name: T::name(),
             data: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self)).cast()) },
+            drop_fn: |ptr| {
+                let ptr = ptr.cast::<T>();
+                let value = unsafe { ptr.read() };
+                drop(value)
+            },
         }
     }
 }
@@ -225,5 +252,16 @@ impl ComponentBuffer {
 
     pub fn is_valid(&self, index: usize) -> bool {
         self.valid_indices.contains(&index)
+    }
+}
+
+impl Drop for ComponentBuffer {
+    fn drop(&mut self) {
+        for idx in self.valid_indices.iter().cloned().collect::<Vec<_>>() {
+            unsafe {
+                let ptr = self.get_raw_unchecked(idx);
+                (self.drop_fn)(NonNull::new_unchecked(ptr))
+            }
+        }
     }
 }

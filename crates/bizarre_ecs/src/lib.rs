@@ -3,6 +3,7 @@
 #![feature(negative_impls)]
 #![feature(trait_alias)]
 
+pub mod commands;
 pub mod component;
 pub mod entity;
 pub mod query;
@@ -14,5 +15,6 @@ pub mod prelude {
     pub use crate::{
         component::Component,
         resource::{Resource, ResourceId},
+        system::IntoSystem,
     };
 }

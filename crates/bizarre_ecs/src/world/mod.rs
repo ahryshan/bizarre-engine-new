@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use unsafe_world_cell::UnsafeWorldCell;
 
 use crate::{
-    component::{component_batch::IntoResourceBatch, Component, ComponentRegistry},
+    component::{
+        component_batch::{BatchedResource, IntoResourceBatch},
+        Component, ComponentRegistry,
+    },
     entity::{Entity, EntitySpawner},
     resource::{IntoStored, Resource, ResourceId, StoredResource},
 };
@@ -41,6 +44,15 @@ impl World {
 
     pub fn insert_resource<R: Resource>(&mut self, resource: R) {
         self.resources.insert(R::id(), resource.into_stored());
+    }
+
+    pub fn insert_resources<T: IntoResourceBatch>(&mut self, batch: T) {
+        let batch = unsafe { batch.into_resource_batch() };
+        for res in batch {
+            let BatchedResource(meta, data) = res;
+            let stored = unsafe { StoredResource::from_meta_and_data(meta, data) };
+            self.resources.insert(stored.id, stored);
+        }
     }
 
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {

@@ -4,7 +4,7 @@ use query_element::QueryData;
 
 use crate::{
     entity::Entity,
-    system::system_param::SystemParam,
+    system::{system_param::SystemParam, WorldAccess},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -44,6 +44,10 @@ impl<'q, D: QueryData> SystemParam for Query<'q, D> {
             world,
             _phantom: PhantomData,
         }
+    }
+
+    fn param_access() -> Vec<WorldAccess> {
+        D::query_access()
     }
 }
 

@@ -260,18 +260,18 @@ impl Default for ComponentRegistry {
 
 #[cfg(test)]
 mod test {
-
     use crate::entity::Entity;
+    use crate::prelude::*;
 
     use super::ComponentRegistry;
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Component, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct Health(pub u32);
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Component, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct Mana(pub u32);
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Component, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct Name(pub &'static str);
 
     #[test]

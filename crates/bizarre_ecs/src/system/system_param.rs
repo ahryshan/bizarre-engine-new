@@ -1,8 +1,16 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 use bizarre_utils::mass_impl;
 
-use crate::{resource::Resource, world::unsafe_world_cell::UnsafeWorldCell};
+use crate::{
+    commands::command_buffer::CommandBuffer, resource::Resource, system::WorldAccessType,
+    world::unsafe_world_cell::UnsafeWorldCell,
+};
+
+use super::WorldAccess;
 
 pub trait SystemParam {
     type Item<'w, 's>;
@@ -16,6 +24,13 @@ pub trait SystemParam {
     ) -> Self::Item<'w, 's>
     where
         Self: Sized;
+
+    fn param_access() -> Vec<WorldAccess>;
+
+    fn take_deferred(state: &mut Self::State) -> Vec<CommandBuffer> {
+        let _ = state;
+        vec![]
+    }
 }
 
 pub type SystemParamItem<'w, 's, P> = <P as SystemParam>::Item<'w, 's>;
@@ -26,6 +41,12 @@ where
     T: Resource,
 {
     value: &'w T,
+}
+
+impl<T: Debug + Resource> Debug for Res<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Res").field("value", &self.value).finish()
+    }
 }
 
 impl<'a, T: Resource> SystemParam for Res<'a, T> {
@@ -43,8 +64,18 @@ impl<'a, T: Resource> SystemParam for Res<'a, T> {
         Self: Sized,
     {
         Res {
-            value: world.resource().unwrap(),
+            value: world
+                .resource()
+                .unwrap_or_else(|| panic!("Failed to get resource `{}`", T::name())),
         }
+    }
+
+    fn param_access() -> Vec<WorldAccess> {
+        vec![WorldAccess {
+            resource_id: T::id(),
+            resource_name: T::name(),
+            access_type: WorldAccessType::ResRead,
+        }]
     }
 }
 
@@ -83,6 +114,14 @@ impl<T: Resource> SystemParam for ResMut<'_, T> {
         ResMut {
             value: world.resource_mut().unwrap(),
         }
+    }
+
+    fn param_access() -> Vec<WorldAccess> {
+        vec![WorldAccess {
+            access_type: WorldAccessType::ResWrite,
+            resource_name: T::name(),
+            resource_id: T::id(),
+        }]
     }
 }
 
@@ -125,6 +164,10 @@ where
     {
         Local { value: state }
     }
+
+    fn param_access() -> Vec<WorldAccess> {
+        vec![]
+    }
 }
 
 impl<T> Deref for Local<'_, T> {
@@ -143,6 +186,7 @@ impl<T> DerefMut for Local<'_, T> {
 
 macro_rules! impl_system_param {
     ($($param:tt),+) => {
+        #[allow(non_snake_case)]
         impl<$($param),+> SystemParam for ($($param,)+)
         where
             $($param: SystemParam),+
@@ -160,6 +204,17 @@ macro_rules! impl_system_param {
             {
                 let ($($param,)+) = param_state;
                 ($($param::get_item(world, $param),)+)
+            }
+
+            fn param_access() -> Vec<WorldAccess> {
+                let mut access = vec![];
+                $(access.extend($param::param_access());)+
+                access
+            }
+
+            fn take_deferred(state: &mut Self::State) -> Vec<CommandBuffer> {
+                let ($($param,)+) = state;
+                vec![$($param::take_deferred($param)),+].into_iter().flatten().collect()
             }
         }
     };
