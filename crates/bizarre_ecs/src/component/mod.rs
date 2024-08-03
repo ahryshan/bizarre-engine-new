@@ -1,13 +1,17 @@
 use std::collections::{BTreeMap, VecDeque};
 
+use component_batch::{BatchedResource, IntoResourceBatch};
+
 use crate::{
     entity::Entity,
     resource::{ComponentBuffer, Resource, ResourceId},
 };
 
-pub trait Component: Resource {}
+pub mod component_batch;
 
-impl<T: Resource> Component for T {}
+pub use bizarre_ecs_proc_macro::Component;
+
+pub trait Component: Resource {}
 
 pub struct ComponentRegistry {
     storages: Vec<Option<ComponentBuffer>>,
@@ -130,6 +134,28 @@ impl ComponentRegistry {
             .as_mut()
             .unwrap()
             .insert(entity.index(), component)
+    }
+
+    pub unsafe fn insert_batch<T: IntoResourceBatch>(&mut self, entity: Entity, batch: T) {
+        let batch = batch.into_resource_batch();
+
+        for BatchedResource(meta, data) in batch {
+            let index = self.index_by_id(&meta.id).unwrap_or_else(|| {
+                panic!(
+                    "Trying to insert an unregistered component: `{}`",
+                    meta.name
+                )
+            });
+
+            let (stored_entity, bitmask) = &mut self.entities[entity.index()];
+            *stored_entity = entity;
+            *bitmask |= self.component_bitmasks[index];
+
+            self.storages[index]
+                .as_mut()
+                .unwrap()
+                .insert_raw(entity.index(), data, meta.size);
+        }
     }
 
     pub fn remove<T: Component>(&mut self, entity: Entity) -> Option<T> {

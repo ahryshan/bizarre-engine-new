@@ -1,15 +1,8 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-};
+use std::ops::{Deref, DerefMut};
 
 use bizarre_utils::mass_impl;
 
-use crate::{
-    resource::{Resource, ResourceId},
-    world::unsafe_world_cell::UnsafeWorldCell,
-};
+use crate::{resource::Resource, world::unsafe_world_cell::UnsafeWorldCell};
 
 pub trait SystemParam {
     type Item<'w, 's>;

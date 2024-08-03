@@ -1,7 +1,6 @@
 use std::{
-    cell::UnsafeCell,
     marker::PhantomData,
-    ptr::{self, NonNull},
+    ptr::{self},
 };
 
 use crate::{

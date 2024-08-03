@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use unsafe_world_cell::UnsafeWorldCell;
 
 use crate::{
-    component::{Component, ComponentRegistry},
+    component::{component_batch::IntoResourceBatch, Component, ComponentRegistry},
     entity::{Entity, EntitySpawner},
-    resource::{IntoStored, Resource, ResourceId, Stored},
+    resource::{IntoStored, Resource, ResourceId, StoredResource},
 };
 
 pub mod unsafe_world_cell;
 
 #[derive(Default)]
 pub struct World {
-    pub(crate) resources: HashMap<ResourceId, Stored>,
+    pub(crate) resources: HashMap<ResourceId, StoredResource>,
     pub(crate) components: ComponentRegistry,
     pub(crate) spawner: EntitySpawner,
 }
@@ -28,6 +28,14 @@ impl World {
             self.components.expand()
         }
         self.components.register_entity(entity);
+        entity
+    }
+
+    pub fn spawn_entity(&mut self, batch: impl IntoResourceBatch) -> Entity {
+        let entity = self.create_entity();
+
+        unsafe { self.components.insert_batch(entity, batch) };
+
         entity
     }
 

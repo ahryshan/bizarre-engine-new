@@ -9,3 +9,10 @@ pub mod query;
 pub mod resource;
 pub mod system;
 pub mod world;
+
+pub mod prelude {
+    pub use crate::{
+        component::Component,
+        resource::{Resource, ResourceId},
+    };
+}
