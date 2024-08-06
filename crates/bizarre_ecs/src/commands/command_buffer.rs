@@ -17,14 +17,18 @@ impl CommandBuffer {
         Self::default()
     }
 
-    unsafe fn get_raw(&mut self) -> RawCommandBuffer {
+    pub unsafe fn as_raw(&mut self) -> RawCommandBuffer {
         RawCommandBuffer {
             bytes: NonNull::new_unchecked(addr_of_mut!(self.bytes)),
         }
     }
 
+    pub fn push(&mut self, cmd: impl Command) {
+        unsafe { self.as_raw().push(cmd) }
+    }
+
     pub fn apply(&mut self, world: &mut World) {
-        unsafe { self.get_raw().apply_or_drop_queued(Some(world.into())) }
+        unsafe { self.as_raw().apply_or_drop_queued(Some(world.into())) }
     }
 
     pub fn append(&mut self, other: &mut CommandBuffer) {
@@ -39,7 +43,7 @@ impl CommandBuffer {
 impl Drop for CommandBuffer {
     fn drop(&mut self) {
         unsafe {
-            self.get_raw().apply_or_drop_queued(None);
+            self.as_raw().apply_or_drop_queued(None);
         }
     }
 }
@@ -48,11 +52,18 @@ pub struct CommandMeta {
     consume: unsafe fn(command: *mut (), Option<NonNull<World>>, cursor: &mut usize),
 }
 
+#[derive(Clone)]
 pub struct RawCommandBuffer {
     bytes: NonNull<Vec<MaybeUninit<u8>>>,
 }
 
 impl RawCommandBuffer {
+    pub fn new() -> Self {
+        Self {
+            bytes: unsafe { NonNull::new_unchecked(Box::into_raw(Box::default())) },
+        }
+    }
+
     pub unsafe fn push<T: Command>(&mut self, cmd: T) {
         #[repr(C, packed)]
         struct Packed<T> {
@@ -62,6 +73,7 @@ impl RawCommandBuffer {
 
         let meta = CommandMeta {
             consume: |command, world, cursor| {
+                *cursor += size_of::<T>();
                 let command: T = command.cast::<T>().read_unaligned();
                 if let Some(mut world) = world {
                     let world = world.as_mut();
@@ -94,8 +106,9 @@ impl RawCommandBuffer {
                 .bytes
                 .as_mut()
                 .as_mut_ptr()
+                .add(cursor)
                 .cast::<CommandMeta>()
-                .read();
+                .read_unaligned();
 
             cursor += size_of::<CommandMeta>();
 
@@ -105,5 +118,19 @@ impl RawCommandBuffer {
         }
 
         self.bytes.as_mut().set_len(0);
+    }
+
+    pub unsafe fn append(&mut self, other: &mut Self) {
+        self.bytes.as_mut().append(other.bytes.as_mut());
+    }
+
+    pub unsafe fn is_empty(&self) -> bool {
+        self.bytes.as_ref().is_empty()
+    }
+}
+
+impl Default for RawCommandBuffer {
+    fn default() -> Self {
+        Self::new()
     }
 }

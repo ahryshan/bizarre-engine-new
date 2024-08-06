@@ -1,15 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{
-    parse::Parse,
-    token::{Comma, Minus},
-    Ident, LitInt,
-};
+use syn::{parse::Parse, token::Comma, Ident, LitInt};
 
 struct MassImplScaffoldInput {
     macro_ident: Ident,
     len: usize,
-    ident: Ident,
+    idents: Vec<Ident>,
 }
 
 impl Parse for MassImplScaffoldInput {
@@ -17,13 +13,17 @@ impl Parse for MassImplScaffoldInput {
         let macro_ident = input.parse::<Ident>()?;
         input.parse::<Comma>()?;
         let len = input.parse::<LitInt>()?.base10_parse()?;
-        input.parse::<Comma>()?;
-        let ident = input.parse::<Ident>()?;
+
+        let mut idents = vec![];
+
+        while input.parse::<Comma>().is_ok() {
+            idents.push(input.parse::<Ident>()?);
+        }
 
         Ok(MassImplScaffoldInput {
             macro_ident,
             len,
-            ident,
+            idents,
         })
     }
 }
@@ -33,17 +33,32 @@ pub fn mass_impl(input: TokenStream) -> TokenStream {
     let MassImplScaffoldInput {
         macro_ident,
         len,
-        ident,
+        idents,
     } = syn::parse_macro_input!(input as MassImplScaffoldInput);
 
-    let idents = (0..len)
-        .map(|i| format_ident!("{ident}{i}"))
-        .collect::<Vec<_>>();
+    let input_idents = idents;
 
-    let invocations = (0..len).map(|i| {
-        let idents = &idents[..=i];
+    let mut tuples = vec![];
+
+    for i in 0..=len {
+        let idents = input_idents.iter().map(|ident| format_ident!("{ident}{i}"));
+
+        if input_idents.len() == 1 {
+            tuples.push(quote! {
+                #(#idents)*
+            })
+        } else {
+            tuples.push(quote! {
+                (#(#idents),*)
+            })
+        }
+    }
+
+    let invocations = (1..=len).map(|i| {
+        let tuples = &tuples[..i];
+
         quote! {
-            #macro_ident!(#(#idents),*);
+            #macro_ident!(#(#tuples),*);
         }
     });
 

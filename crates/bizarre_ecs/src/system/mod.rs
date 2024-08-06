@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, marker::PhantomData};
 
 use bitflags::bitflags;
 use system_param::SystemParam;
@@ -10,6 +10,8 @@ use crate::{
 };
 
 pub mod functional_system;
+pub mod schedule;
+pub mod system_config;
 pub mod system_graph;
 pub mod system_param;
 
@@ -60,11 +62,6 @@ impl Display for WorldAccess {
     }
 }
 
-pub struct SystemMeta {
-    name: &'static str,
-    access: Box<[WorldAccess]>,
-}
-
 pub trait System {
     fn run(&mut self, world: UnsafeWorldCell);
 
@@ -72,17 +69,13 @@ pub trait System {
 
     fn is_init(&self) -> bool;
 
-    fn name_static() -> &'static str
-    where
-        Self: Sized;
-
-    fn name(&self) -> &'static str;
-
-    fn system_access(&self) -> &[WorldAccess];
-
     fn apply_deferred(&mut self, world: &mut World);
 
-    fn take_deferred(&mut self) -> CommandBuffer;
+    fn take_deferred(&mut self) -> Option<CommandBuffer>;
+
+    fn access() -> Box<[WorldAccess]>
+    where
+        Self: Sized;
 }
 
 pub trait IntoSystem<Marker> {
@@ -134,9 +127,7 @@ mod tests {
 
         let mut sg = SystemGraph::new();
 
-        sg.add_system(delta_time_system);
-
-        sg.iter().for_each(|s| println!("System: {}", s.name()));
+        sg.add_systems(delta_time_system);
 
         sg.init_systems(&world);
         sg.run_systems(&mut world);

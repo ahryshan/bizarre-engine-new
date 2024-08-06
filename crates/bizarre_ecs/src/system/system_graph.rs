@@ -1,43 +1,53 @@
-use crate::world::World;
+use crate::{commands::command_buffer::CommandBuffer, world::World};
 
-use super::{IntoSystem, System};
+use super::system_config::{IntoSystemConfigs, SystemConfig, SystemConfigs};
 
-#[derive(Default)]
 pub struct SystemGraph {
-    systems: Vec<Box<dyn System>>,
+    systems: Vec<SystemConfig>,
 }
 
 impl SystemGraph {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            systems: Default::default(),
+        }
     }
 
-    pub fn add_system<M, S>(&mut self, system: S)
-    where
-        S: IntoSystem<M> + 'static,
-    {
-        self.systems.push(Box::new(system.into_system()))
+    pub fn add_systems<M>(&mut self, systems: impl IntoSystemConfigs<M>) {
+        let systems = systems.into_system_configs();
+
+        match systems {
+            SystemConfigs::Config(config) => self.systems.push(config),
+            SystemConfigs::Configs(configs) => {
+                configs.into_iter().for_each(|s| self.add_systems(s))
+            }
+        }
     }
 
     pub fn init_systems(&mut self, world: &World) {
-        let cell = unsafe { world.as_unsafe_cell() };
-
         self.systems
             .iter_mut()
-            .filter(|s| !s.is_init())
-            .for_each(|s| s.init(cell))
+            .filter(|s| !s.system.is_init())
+            .for_each(|s| s.system.init(unsafe { world.as_unsafe_cell() }))
     }
 
-    pub fn run_systems(&mut self, world: &mut World) {
-        let cell = unsafe { world.as_unsafe_cell() };
-
+    pub fn run_systems(&mut self, world: &mut World) -> CommandBuffer {
         self.systems
             .iter_mut()
-            .filter(|s| s.is_init())
-            .for_each(|system| system.run(cell));
+            .filter(|s| s.system.is_init())
+            .filter_map(|s| {
+                s.system.run(unsafe { world.as_unsafe_cell() });
+                s.system.take_deferred()
+            })
+            .fold(CommandBuffer::new(), |mut acc, mut curr| {
+                acc.append(&mut curr);
+                acc
+            })
     }
+}
 
-    pub fn iter(&self) -> impl Iterator<Item = &Box<dyn System>> {
-        self.systems.iter()
+impl Default for SystemGraph {
+    fn default() -> Self {
+        Self::new()
     }
 }

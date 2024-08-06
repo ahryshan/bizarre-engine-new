@@ -1,14 +1,13 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::Ordering};
 
 use unsafe_world_cell::UnsafeWorldCell;
 
 use crate::{
-    component::{
-        component_batch::{BatchedResource, IntoResourceBatch},
-        Component, ComponentRegistry,
-    },
+    commands::command_buffer::RawCommandBuffer,
+    component::{component_batch::ComponentBatch, Component, ComponentRegistry},
     entity::{Entity, EntitySpawner},
     resource::{IntoStored, Resource, ResourceId, StoredResource},
+    system::{schedule::Schedule, system_config::IntoSystemConfigs, system_graph::SystemGraph},
 };
 
 pub mod unsafe_world_cell;
@@ -18,6 +17,8 @@ pub struct World {
     pub(crate) resources: HashMap<ResourceId, StoredResource>,
     pub(crate) components: ComponentRegistry,
     pub(crate) spawner: EntitySpawner,
+    pub(crate) schedules: HashMap<Schedule, SystemGraph>,
+    pub(crate) deferred_commands: RawCommandBuffer,
 }
 
 impl World {
@@ -34,25 +35,21 @@ impl World {
         entity
     }
 
-    pub fn spawn_entity(&mut self, batch: impl IntoResourceBatch) -> Entity {
+    pub fn spawn_entity(&mut self, batch: impl ComponentBatch) -> Entity {
         let entity = self.create_entity();
 
-        unsafe { self.components.insert_batch(entity, batch) };
+        self.components.insert_batch(entity, batch);
 
         entity
     }
 
-    pub fn insert_resource<R: Resource>(&mut self, resource: R) {
-        self.resources.insert(R::id(), resource.into_stored());
+    pub fn kill(&mut self, entity: Entity) {
+        self.spawner.kill(entity);
+        self.components.remove_entity(entity);
     }
 
-    pub fn insert_resources<T: IntoResourceBatch>(&mut self, batch: T) {
-        let batch = unsafe { batch.into_resource_batch() };
-        for res in batch {
-            let BatchedResource(meta, data) = res;
-            let stored = unsafe { StoredResource::from_meta_and_data(meta, data) };
-            self.resources.insert(stored.id, stored);
-        }
+    pub fn insert_resource<R: Resource>(&mut self, resource: R) {
+        self.resources.insert(R::id(), resource.into_stored());
     }
 
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
@@ -75,8 +72,16 @@ impl World {
         self.components.register::<C>()
     }
 
+    pub fn register_components<C: ComponentBatch>(&mut self) {
+        self.components.register_batch::<C>();
+    }
+
     pub fn insert_component<C: Component>(&mut self, entity: Entity, component: C) -> Option<C> {
         self.components.insert(entity, component)
+    }
+
+    pub fn insert_components<C: ComponentBatch>(&mut self, entity: Entity, components: C) {
+        self.components.insert_batch(entity, components)
     }
 
     pub fn component<C: Component>(&self, entity: Entity) -> Option<&C> {
@@ -91,7 +96,67 @@ impl World {
         self.components.remove(entity)
     }
 
+    pub fn remove_components<C: ComponentBatch>(&mut self, entity: Entity) {
+        self.components.remove_batch::<C>(entity)
+    }
+
+    pub fn add_schedule(&mut self, schedule: Schedule) {
+        if self.schedules.contains_key(&schedule) {
+            panic!("Trying to insert a `Schedule` {schedule:?} while there is already one in this world");
+        }
+
+        self.schedules.insert(schedule, SystemGraph::new());
+    }
+
+    pub fn init_schedule(&mut self, schedule: Schedule) {
+        self.flush();
+
+        self.with_schedule(schedule, |world, sg| sg.init_systems(world));
+    }
+
+    pub fn run_schedule(&mut self, schedule: Schedule) {
+        self.flush();
+
+        let mut cmd = self.with_schedule(schedule, |world, sg| sg.run_systems(world));
+        if !cmd.is_empty() {
+            unsafe { self.deferred_commands.append(&mut cmd.as_raw()) }
+        }
+    }
+
+    fn with_schedule<T, F>(&mut self, schedule: Schedule, func: F) -> T
+    where
+        F: FnOnce(&mut World, &mut SystemGraph) -> T,
+    {
+        let mut sg = self.schedules.remove(&schedule).unwrap_or_else(|| {
+            panic!("Trying to run `{schedule:?}` but the `World` does not have this one")
+        });
+
+        let ret = func(self, &mut sg);
+
+        self.schedules.insert(schedule, sg);
+
+        ret
+    }
+
+    pub fn flush(&mut self) {
+        if !unsafe { self.deferred_commands.is_empty() } {
+            unsafe {
+                self.deferred_commands
+                    .clone()
+                    .apply_or_drop_queued(Some(self.into()))
+            }
+        }
+    }
+
+    pub fn add_systems<M>(&mut self, schedule: Schedule, systems: impl IntoSystemConfigs<M>) {
+        self.with_schedule(schedule, |_, sg| sg.add_systems(systems));
+    }
+
     pub unsafe fn as_unsafe_cell(&self) -> UnsafeWorldCell {
         UnsafeWorldCell::new(self)
+    }
+
+    pub fn entity_count(&self) -> u64 {
+        self.spawner.next_id.load(Ordering::SeqCst) - self.spawner.dead.len() as u64
     }
 }

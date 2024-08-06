@@ -1,4 +1,9 @@
+use std::time::Instant;
+
 use anyhow::Result;
+use bizarre_engine::ecs::commands::Commands;
+use bizarre_engine::ecs::system::schedule::Schedule;
+use bizarre_engine::ecs::system::system_config::IntoSystemConfigs;
 use bizarre_engine::ecs::system::system_param::{Local, Res, ResMut};
 use bizarre_engine::ecs::{
     component::Component, entity::Entity, query::Query, system::system_graph::SystemGraph,
@@ -16,61 +21,57 @@ struct Mana(pub u32);
 #[derive(Component, Debug)]
 struct Strength(pub u32);
 
-#[derive(Resource, Debug)]
-struct DeltaTime(f64);
+fn spawn(mut commands: Commands) {
+    for _ in 0..100000 {
+        commands.spawn_empty();
+    }
 
-#[derive(Resource, Debug)]
-struct RunTime(f64);
-
-fn list_entities(delta: Res<DeltaTime>, query: Query<(Entity, &mut Health, &Mana, &Strength)>) {
-    for entity in query {
-        println!("{entity:?}");
-        let (_, health, ..) = entity;
-        health.0 += (delta.0 * 10.0) as u32;
+    for _ in 0..80000 {
+        commands.spawn(Strength(100));
     }
 }
 
-fn update_run_time(delta: Res<DeltaTime>, mut run_time: ResMut<RunTime>) {
-    run_time.0 += delta.0;
+fn count_entities(strength: Query<&Strength>, all: Query<Entity>) {
+    let all = all.into_iter().collect::<Vec<_>>();
+    let all_count = all.len();
+    let weak = strength.clone().into_iter().filter(|s| s.0 < 100).count();
+    let strong = strength.clone().into_iter().filter(|s| s.0 >= 100).count();
+
+    println!("There are {all_count} entities overall, {weak} are weak and {strong} are strong");
 }
 
-fn print_times(delta: Res<DeltaTime>, run_time: Res<RunTime>) {
-    println!("Delta: {:?}, runtime: {:?}", &delta, &run_time);
+fn kill_weak(
+    mut start_counter: Local<usize>,
+    mut commands: Commands,
+    query: Query<(Entity, &Strength)>,
+) {
+    if *start_counter < 5 {
+        *start_counter += 1;
+        return;
+    }
+
+    let iter = query.into_iter().filter(|(e, s)| s.0 < 100);
+
+    let count = iter.clone().count();
+    let count = ((count as f32 * 0.5).floor() + 1.0) as usize;
+
+    for (e, _) in iter.clone().take(count) {
+        commands.entity(e).kill();
+    }
 }
 
-fn counter(mut counter: Local<u32>) {
-    println!("Counter has been run {} times before", *counter);
-    *counter += 1
-}
-
-fn main() -> Result<()> {
+fn main() {
     let mut world = World::new();
 
-    world.register_component::<Health>();
-    world.register_component::<Mana>();
     world.register_component::<Strength>();
 
-    world.insert_resources((DeltaTime(0.16), RunTime(0.0)));
+    world.add_schedule(Schedule::Update);
 
-    let entity = world.spawn_entity((Health(100), Mana(20), Strength(12)));
-    let entity = world.spawn_entity((Health(200), Strength(12)));
-    let entity = world.spawn_entity((Health(300), Mana(30), Strength(12)));
-    let entity = world.spawn_entity((Health(400), Mana(40), Strength(12)));
+    world.add_systems(Schedule::Update, (spawn, count_entities));
 
-    let mut sg = SystemGraph::new();
+    world.init_schedule(Schedule::Update);
 
-    sg.add_system(update_run_time);
-    sg.add_system(print_times);
-    sg.add_system(list_entities);
-    sg.add_system(counter);
-
-    sg.init_systems(&world);
-
-    sg.run_systems(&mut world);
-    sg.run_systems(&mut world);
-    sg.run_systems(&mut world);
-    sg.run_systems(&mut world);
-    sg.run_systems(&mut world);
-
-    Ok(())
+    world.run_schedule(Schedule::Update);
+    world.run_schedule(Schedule::Update);
+    world.run_schedule(Schedule::Update);
 }

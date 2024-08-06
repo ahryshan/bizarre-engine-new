@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use component_batch::{BatchedResource, IntoResourceBatch};
+use component_batch::ComponentBatch;
 
 use crate::{
     entity::Entity,
@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub mod component_batch;
+pub mod component_commands;
 
 pub use bizarre_ecs_proc_macro::Component;
 
@@ -56,9 +57,7 @@ impl ComponentRegistry {
 
     pub fn register_entity(&mut self, entity: Entity) {
         let (stored, bitmask) = &mut self.entities[entity.index()];
-        if entity.gen() > stored.gen() {
-            (*stored, *bitmask) = (entity, 0)
-        }
+        (*stored, *bitmask) = (entity, 0)
     }
 
     pub fn remove_entity(&mut self, entity: Entity) {
@@ -121,6 +120,10 @@ impl ComponentRegistry {
         self.lookup.insert(T::id(), index);
     }
 
+    pub fn register_batch<T: ComponentBatch>(&mut self) {
+        T::register(self);
+    }
+
     pub fn insert<T: Component>(&mut self, entity: Entity, component: T) -> Option<T> {
         let index = self
             .index::<T>()
@@ -136,26 +139,8 @@ impl ComponentRegistry {
             .insert(entity.index(), component)
     }
 
-    pub unsafe fn insert_batch<T: IntoResourceBatch>(&mut self, entity: Entity, batch: T) {
-        let batch = batch.into_resource_batch();
-
-        for BatchedResource(meta, data) in batch {
-            let index = self.index_by_id(&meta.id).unwrap_or_else(|| {
-                panic!(
-                    "Trying to insert an unregistered component: `{}`",
-                    meta.name
-                )
-            });
-
-            let (stored_entity, bitmask) = &mut self.entities[entity.index()];
-            *stored_entity = entity;
-            *bitmask |= self.component_bitmasks[index];
-
-            self.storages[index]
-                .as_mut()
-                .unwrap()
-                .insert_raw(entity.index(), data, meta.size);
-        }
+    pub fn insert_batch<T: ComponentBatch>(&mut self, entity: Entity, batch: T) {
+        batch.insert(self, entity);
     }
 
     pub fn remove<T: Component>(&mut self, entity: Entity) -> Option<T> {
@@ -171,6 +156,10 @@ impl ComponentRegistry {
             .remove::<T>(entity.index())
     }
 
+    pub fn remove_batch<T: ComponentBatch>(&mut self, entity: Entity) {
+        T::remove(self, entity);
+    }
+
     pub fn remove_storage<T: Component>(&mut self) -> Option<ComponentBuffer> {
         let index = self.index::<T>()?;
 
@@ -180,6 +169,10 @@ impl ComponentRegistry {
     }
 
     pub fn filter_entities(&self, ids: &[ResourceId]) -> Vec<Entity> {
+        if ids.is_empty() {
+            return self.entities.iter().map(|(e, _)| *e).collect();
+        }
+
         let query_bitmask = ids.iter().fold(0u128, |acc, curr| {
             let index = self
                 .index_by_id(curr)
@@ -190,13 +183,8 @@ impl ComponentRegistry {
 
         self.entities
             .iter()
-            .filter_map(|(entity, bitmask)| {
-                if bitmask & query_bitmask == query_bitmask {
-                    Some(*entity)
-                } else {
-                    None
-                }
-            })
+            .filter(|(e, b)| e.gen() != 0 && b & query_bitmask == query_bitmask)
+            .map(|(e, _)| *e)
             .collect()
     }
 

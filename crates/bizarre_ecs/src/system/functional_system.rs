@@ -1,6 +1,5 @@
-use std::{any::type_name, marker::PhantomData};
+use std::marker::PhantomData;
 
-use bitflags::Flags;
 use bizarre_utils::mass_impl;
 
 use crate::{
@@ -10,7 +9,7 @@ use crate::{
 
 use super::{
     system_param::{SystemParamItem, SystemParamState},
-    IntoSystem, System, SystemMeta, SystemParam, WorldAccess, WorldAccessType,
+    IntoSystem, System, SystemParam, WorldAccess, WorldAccessType,
 };
 
 pub trait FnSys<Marker> {
@@ -25,7 +24,6 @@ where
 {
     func: F,
     init: bool,
-    meta: SystemMeta,
     param_state: Option<SystemParamState<F::Param>>,
     _phantom: PhantomData<Marker>,
 }
@@ -48,29 +46,18 @@ where
         self.func.run(param_value)
     }
 
-    fn name_static() -> &'static str {
-        type_name::<F>()
-    }
-
-    fn name(&self) -> &'static str {
-        self.meta.name
-    }
-
-    fn system_access(&self) -> &[super::WorldAccess] {
-        &self.meta.access
-    }
-
     fn apply_deferred(&mut self, world: &mut World) {
-        self.take_deferred().apply(world);
+        if let Some(mut cmd) = self.take_deferred() {
+            cmd.apply(world)
+        }
     }
 
-    fn take_deferred(&mut self) -> CommandBuffer {
+    fn take_deferred(&mut self) -> Option<CommandBuffer> {
         F::Param::take_deferred(self.param_state.as_mut().unwrap())
-            .into_iter()
-            .fold(CommandBuffer::new(), |mut acc, mut curr| {
-                acc.append(&mut curr);
-                acc
-            })
+    }
+
+    fn access() -> Box<[WorldAccess]> {
+        F::Param::param_access().into()
     }
 }
 
@@ -82,28 +69,22 @@ where
     type System = FunctionalSystem<Marker, F>;
 
     fn into_system(self) -> Self::System {
-        let meta = SystemMeta {
-            name: type_name::<F>(),
-            access: F::Param::param_access().into(),
-        };
-
-        #[cfg(debug_assertions)]
-        {
-            if let Some(conflicts) = get_internal_conflicts(&meta.access) {
-                let msg = conflicts.into_iter().enumerate().fold(
-                    format!(
-                        "Failed to build system `{}`, found access conflicts:\n",
-                        meta.name
-                    ),
-                    |acc, (num, msg)| format!("{acc}\t{}. {}\n", num + 1, msg),
-                );
-                panic!("{msg}");
-            }
-        }
+        // #[cfg(debug_assertions)]
+        // {
+        //     if let Some(conflicts) = get_internal_conflicts(&meta.access) {
+        //         let msg = conflicts.into_iter().enumerate().fold(
+        //             format!(
+        //                 "Failed to build system `{}`, found access conflicts:\n",
+        //                 meta.name
+        //             ),
+        //             |acc, (num, msg)| format!("{acc}\t{}. {}\n", num + 1, msg),
+        //         );
+        //         panic!("{msg}");
+        //     }
+        // }
 
         Self::System {
             func: self,
-            meta,
             init: false,
             param_state: None,
             _phantom: PhantomData,

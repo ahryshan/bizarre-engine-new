@@ -6,6 +6,8 @@ use std::{
 
 use crate::query::query_element::QueryData;
 
+pub mod entity_commands;
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Hash, Clone, Copy)]
 pub struct Entity {
     ///|gen|id |
@@ -15,19 +17,23 @@ pub struct Entity {
 }
 
 impl Entity {
-    const GEN_SHIFT: usize = 64 - 16;
+    pub const GEN_SHIFT: usize = 64 - 16;
+    pub const GEN_SIZE: usize = 16;
+    pub const GEN_MAX: u16 = u16::MAX;
+    pub const ID_MAX: u64 = u64::MAX << Self::GEN_SIZE >> Self::GEN_SIZE;
 
     /// Constructs an `Entity` from generation and id.
     /// *NOTE*: an entity with generation 0 is a a special value, which is used in multiple places
     /// to note an entity that is not being considered. So the youngest valid entity is an entity
     /// with gen = 1 and id = 0
     pub const fn from_gen_id(gen: u16, id: u64) -> Self {
+        debug_assert!(id <= Self::ID_MAX);
         let gen = (gen as u64) << Self::GEN_SHIFT;
         Self { inner: id + gen }
     }
 
     pub fn id(&self) -> u64 {
-        self.inner << Self::GEN_SHIFT >> Self::GEN_SHIFT
+        self.inner << Self::GEN_SIZE >> Self::GEN_SIZE
     }
 
     pub fn index(&self) -> usize {
@@ -75,8 +81,8 @@ impl QueryData for Entity {
 
 #[derive(Default)]
 pub struct EntitySpawner {
-    next_id: AtomicU64,
-    dead: VecDeque<Entity>,
+    pub(crate) next_id: AtomicU64,
+    pub(crate) dead: VecDeque<Entity>,
 }
 
 impl EntitySpawner {

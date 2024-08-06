@@ -10,6 +10,7 @@ use crate::{
 
 pub mod query_element;
 
+#[derive(Clone)]
 pub struct Query<'q, D: QueryData> {
     world: UnsafeWorldCell<'q>,
     _phantom: PhantomData<D>,
@@ -66,6 +67,7 @@ impl<'q, D: QueryData> IntoIterator for Query<'q, D> {
     }
 }
 
+#[derive(Clone)]
 pub struct QueryIterator<'q, D: QueryData> {
     world: UnsafeWorldCell<'q>,
     entities: Vec<Entity>,

@@ -2,6 +2,7 @@
 #![feature(fn_traits)]
 #![feature(negative_impls)]
 #![feature(trait_alias)]
+#![feature(type_changing_struct_update)]
 
 pub mod commands;
 pub mod component;

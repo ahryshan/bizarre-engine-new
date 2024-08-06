@@ -7,6 +7,8 @@ use std::{
 
 pub use bizarre_ecs_proc_macro::Resource;
 
+pub mod resource_commands;
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResourceId(TypeId);
 

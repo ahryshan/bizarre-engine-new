@@ -1,6 +1,13 @@
 use command_buffer::CommandBuffer;
 
 use crate::{
+    component::component_batch::ComponentBatch,
+    entity::{
+        entity_commands::{EntityCmdBuilder, SpawnEntityCmd},
+        Entity,
+    },
+    prelude::Resource,
+    resource::resource_commands::{InsertResourceCmd, RemoveResourceCmd},
     system::system_param::SystemParam,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -18,6 +25,30 @@ pub struct Commands<'s> {
 impl<'s> Commands<'s> {
     pub fn new(buffer: &'s mut CommandBuffer) -> Self {
         Self { buffer }
+    }
+
+    pub fn spawn(&mut self, components: impl ComponentBatch) -> &mut Self {
+        self.buffer.push(SpawnEntityCmd::new(components));
+        self
+    }
+
+    pub fn spawn_empty(&mut self) -> &mut Self {
+        self.spawn(());
+        self
+    }
+
+    pub fn entity(&mut self, entity: Entity) -> EntityCmdBuilder<false> {
+        EntityCmdBuilder::new(self.buffer, entity)
+    }
+
+    pub fn insert_resource<T: Resource>(&mut self, resource: T) -> &mut Self {
+        self.buffer.push(InsertResourceCmd::new(resource));
+        self
+    }
+
+    pub fn remove_resource<T: Resource>(&mut self) -> &mut Self {
+        self.buffer.push(RemoveResourceCmd::<T>::new());
+        self
     }
 }
 
@@ -44,13 +75,13 @@ impl SystemParam for Commands<'_> {
         vec![]
     }
 
-    fn take_deferred(state: &mut Self::State) -> Vec<CommandBuffer> {
+    fn take_deferred(state: &mut Self::State) -> Option<CommandBuffer> {
         if state.is_empty() {
-            vec![]
+            None
         } else {
             let mut buffer = CommandBuffer::new();
             buffer.append(state);
-            vec![buffer]
+            Some(buffer)
         }
     }
 }

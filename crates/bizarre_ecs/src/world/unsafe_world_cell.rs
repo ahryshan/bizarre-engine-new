@@ -19,11 +19,11 @@ impl<'w> UnsafeWorldCell<'w> {
         Self(ptr::from_ref(world).cast_mut(), PhantomData)
     }
 
-    unsafe fn unsafe_world(self) -> &'w World {
+    pub unsafe fn unsafe_world(self) -> &'w World {
         &*self.0
     }
 
-    unsafe fn unsafe_world_mut(self) -> &'w mut World {
+    pub unsafe fn unsafe_world_mut(self) -> &'w mut World {
         &mut *self.0
     }
 

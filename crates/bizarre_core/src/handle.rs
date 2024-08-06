@@ -1,6 +1,5 @@
-use std::{fmt::Debug, marker::PhantomData};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
-#[derive(Hash)]
 pub struct Handle<T> {
     handle: usize,
     _marker: PhantomData<T>,
@@ -43,6 +42,13 @@ macro_rules! impl_from_for_handle {
 impl_from_for_handle!(u16, "16", "32", "64");
 impl_from_for_handle!(u32, "32", "64");
 impl_from_for_handle!(u64, "64");
+
+impl<T> Hash for Handle<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.handle.hash(state);
+        self._marker.hash(state);
+    }
+}
 
 impl<T> PartialEq for Handle<T> {
     fn eq(&self, other: &Self) -> bool {

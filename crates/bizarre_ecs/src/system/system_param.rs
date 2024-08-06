@@ -27,9 +27,9 @@ pub trait SystemParam {
 
     fn param_access() -> Vec<WorldAccess>;
 
-    fn take_deferred(state: &mut Self::State) -> Vec<CommandBuffer> {
+    fn take_deferred(state: &mut Self::State) -> Option<CommandBuffer> {
         let _ = state;
-        vec![]
+        None
     }
 }
 
@@ -212,9 +212,20 @@ macro_rules! impl_system_param {
                 access
             }
 
-            fn take_deferred(state: &mut Self::State) -> Vec<CommandBuffer> {
+            fn take_deferred(state: &mut Self::State) -> Option<CommandBuffer> {
                 let ($($param,)+) = state;
-                vec![$($param::take_deferred($param)),+].into_iter().flatten().collect()
+                let cmd = vec![$($param::take_deferred($param)),+]
+                    .into_iter()
+                    .flatten()
+                    .fold(CommandBuffer::new(), |mut acc, mut curr| {
+                        acc.append(&mut curr);
+                        acc
+                    });
+                if !cmd.is_empty() {
+                    Some(cmd)
+                } else {
+                    None
+                }
             }
         }
     };
