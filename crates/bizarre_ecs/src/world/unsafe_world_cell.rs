@@ -31,7 +31,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.unsafe_world()
                 .resources
-                .get(&R::id())
+                .get(&R::resource_id())
                 .map(|r| r.as_ref())
         }
     }
@@ -40,7 +40,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.unsafe_world_mut()
                 .resources
-                .get_mut(&R::id())
+                .get_mut(&R::resource_id())
                 .map(|r| r.as_mut())
         }
     }

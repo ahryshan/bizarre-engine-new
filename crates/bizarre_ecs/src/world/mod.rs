@@ -49,22 +49,25 @@ impl World {
     }
 
     pub fn insert_resource<R: Resource>(&mut self, resource: R) {
-        self.resources.insert(R::id(), resource.into_stored());
+        self.resources
+            .insert(R::resource_id(), resource.into_stored());
     }
 
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
         self.resources
-            .remove(&R::id())
+            .remove(&R::resource_id())
             .map(|r| unsafe { r.into_inner() })
     }
 
     pub fn resource<R: Resource>(&self) -> Option<&R> {
-        self.resources.get(&R::id()).map(|r| unsafe { r.as_ref() })
+        self.resources
+            .get(&R::resource_id())
+            .map(|r| unsafe { r.as_ref() })
     }
 
     pub fn resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
         self.resources
-            .get_mut(&R::id())
+            .get_mut(&R::resource_id())
             .map(|r| unsafe { r.as_mut() })
     }
 

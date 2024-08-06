@@ -1,9 +1,11 @@
 use std::{any::TypeId, collections::HashMap};
 
 use anyhow::{anyhow, Result};
+use bizarre_ecs::prelude::*;
 
 use crate::{event::Event, event_reader::EventReader, typed_event_queue::TypedEventQueue};
 
+#[derive(Resource)]
 pub struct EventQueue {
     queues: HashMap<TypeId, TypedEventQueue>,
     next_reader_id: usize,
@@ -25,7 +27,7 @@ impl EventQueue {
         EventReader { id }
     }
 
-    pub fn register_reader<'a, E>(&mut self, reader: EventReader) -> Result<()>
+    pub fn register_reader<E>(&mut self, reader: EventReader) -> Result<()>
     where
         E: Event,
     {

@@ -23,19 +23,19 @@ where
     type Item<'w> = &'w T;
 
     fn resource_ids() -> Vec<ResourceId> {
-        vec![T::id()]
+        vec![T::resource_id()]
     }
 
     unsafe fn get_item(world: UnsafeWorldCell, entity: Entity) -> Self::Item<'_> {
         world
             .component(entity)
-            .unwrap_or_else(|| panic!("Failed to get {} for {entity:?}", T::name()))
+            .unwrap_or_else(|| panic!("Failed to get {} for {entity:?}", T::resource_name()))
     }
 
     fn query_access() -> Vec<WorldAccess> {
         vec![WorldAccess {
-            resource_id: T::id(),
-            resource_name: T::name(),
+            resource_id: T::resource_id(),
+            resource_name: T::resource_name(),
             access_type: WorldAccessType::CompRead,
         }]
     }
@@ -48,19 +48,19 @@ where
     type Item<'w> = &'w mut T;
 
     fn resource_ids() -> Vec<ResourceId> {
-        vec![T::id()]
+        vec![T::resource_id()]
     }
 
     unsafe fn get_item(world: UnsafeWorldCell, entity: Entity) -> Self::Item<'_> {
         world
             .component_mut(entity)
-            .unwrap_or_else(|| panic!("Failed to get {} for {entity:?}", T::name()))
+            .unwrap_or_else(|| panic!("Failed to get {} for {entity:?}", T::resource_name()))
     }
 
     fn query_access() -> Vec<WorldAccess> {
         vec![WorldAccess {
-            resource_id: T::id(),
-            resource_name: T::name(),
+            resource_id: T::resource_id(),
+            resource_name: T::resource_name(),
             access_type: WorldAccessType::CompWrite,
         }]
     }

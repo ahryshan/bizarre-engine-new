@@ -1,7 +1,6 @@
 use std::{
-    any::{Any, TypeId},
+    any::{type_name, Any, TypeId},
     collections::HashMap,
-    marker::PhantomData,
 };
 
 use anyhow::{anyhow, Result};
@@ -12,6 +11,7 @@ type IteratorType<'frame> = std::slice::Iter<'frame, Box<dyn Any>>;
 
 pub struct TypedEventQueue {
     pub(crate) type_id: TypeId,
+    pub(crate) type_name: &'static str,
     front: Vec<Box<dyn Any>>,
     back: Vec<Box<dyn Any>>,
     readers: HashMap<EventReader, usize>,
@@ -24,6 +24,7 @@ impl TypedEventQueue {
     {
         Self {
             type_id: TypeId::of::<E>(),
+            type_name: type_name::<E>(),
             front: Default::default(),
             back: Default::default(),
             readers: Default::default(),
@@ -34,6 +35,13 @@ impl TypedEventQueue {
     where
         E: Event + Sized + 'static,
     {
+        if TypeId::of::<E>() != self.type_id {
+            panic!(
+                "Trying to insert an `Event` of type `{}` into a queue of type `{}`",
+                type_name::<E>(),
+                self.type_name,
+            )
+        }
         self.back.push(Box::new(event))
     }
 
@@ -76,7 +84,7 @@ impl TypedEventQueue {
             .front
             .iter()
             .skip(*reader_index)
-            .map(|ev| (&*ev).downcast_ref::<E>().unwrap())
+            .map(|ev| (*ev).downcast_ref::<E>().unwrap())
             .cloned()
             .collect::<Box<[E]>>();
 
@@ -86,9 +94,7 @@ impl TypedEventQueue {
     }
 
     pub fn add_reader(&mut self, reader: EventReader) {
-        if let None = self.readers.get(&reader) {
-            self.readers.insert(reader, 0);
-        }
+        self.readers.entry(reader).or_insert(0);
     }
 
     pub fn swap_buffers(&mut self) {

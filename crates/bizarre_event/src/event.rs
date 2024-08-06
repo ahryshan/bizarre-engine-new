@@ -1,3 +1,3 @@
-pub trait Event: Send + Sync + 'static {}
+pub trait Event: Clone + Send + Sync + 'static {}
 
-impl<T> Event for T where T: Sync + Send + 'static {}
+impl<T> Event for T where T: Clone + Sync + Send + 'static {}

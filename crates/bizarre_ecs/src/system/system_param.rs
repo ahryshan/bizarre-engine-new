@@ -6,8 +6,10 @@ use std::{
 use bizarre_utils::mass_impl;
 
 use crate::{
-    commands::command_buffer::CommandBuffer, resource::Resource, system::WorldAccessType,
-    world::unsafe_world_cell::UnsafeWorldCell,
+    commands::command_buffer::CommandBuffer,
+    resource::Resource,
+    system::WorldAccessType,
+    world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
 use super::WorldAccess;
@@ -66,14 +68,14 @@ impl<'a, T: Resource> SystemParam for Res<'a, T> {
         Res {
             value: world
                 .resource()
-                .unwrap_or_else(|| panic!("Failed to get resource `{}`", T::name())),
+                .unwrap_or_else(|| panic!("Failed to get resource `{}`", T::resource_name())),
         }
     }
 
     fn param_access() -> Vec<WorldAccess> {
         vec![WorldAccess {
-            resource_id: T::id(),
-            resource_name: T::name(),
+            resource_id: T::resource_id(),
+            resource_name: T::resource_name(),
             access_type: WorldAccessType::ResRead,
         }]
     }
@@ -119,8 +121,8 @@ impl<T: Resource> SystemParam for ResMut<'_, T> {
     fn param_access() -> Vec<WorldAccess> {
         vec![WorldAccess {
             access_type: WorldAccessType::ResWrite,
-            resource_name: T::name(),
-            resource_id: T::id(),
+            resource_name: T::resource_name(),
+            resource_id: T::resource_id(),
         }]
     }
 }
@@ -139,20 +141,30 @@ impl<T: Resource> DerefMut for ResMut<'_, T> {
     }
 }
 
+pub trait FromWorld {
+    fn from_world(world: &mut World) -> Self;
+}
+
+impl<T: Default> FromWorld for T {
+    fn from_world(_: &mut World) -> Self {
+        Self::default()
+    }
+}
+
 pub struct Local<'s, T> {
     value: &'s mut T,
 }
 
 impl<T> SystemParam for Local<'_, T>
 where
-    T: 'static + Default,
+    T: 'static + FromWorld,
 {
     type Item<'w, 's> = Local<'s, T>;
 
     type State = T;
 
-    unsafe fn init(_: UnsafeWorldCell) -> Self::State {
-        T::default()
+    unsafe fn init(world: UnsafeWorldCell) -> Self::State {
+        T::from_world(world.unsafe_world_mut())
     }
 
     unsafe fn get_item<'w, 's>(

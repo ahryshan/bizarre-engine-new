@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
+bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }

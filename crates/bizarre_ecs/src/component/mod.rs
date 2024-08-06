@@ -117,7 +117,7 @@ impl ComponentRegistry {
             index
         };
 
-        self.lookup.insert(T::id(), index);
+        self.lookup.insert(T::resource_id(), index);
     }
 
     pub fn register_batch<T: ComponentBatch>(&mut self) {
@@ -127,7 +127,7 @@ impl ComponentRegistry {
     pub fn insert<T: Component>(&mut self, entity: Entity, component: T) -> Option<T> {
         let index = self
             .index::<T>()
-            .unwrap_or_else(|| panic!("Component `{}` is not registered", T::name()));
+            .unwrap_or_else(|| panic!("Component `{}` is not registered", T::resource_name()));
 
         let (stored_entity, bitmask) = &mut self.entities[entity.index()];
         *stored_entity = entity;
@@ -164,7 +164,7 @@ impl ComponentRegistry {
         let index = self.index::<T>()?;
 
         let ret = self.storages[index].take();
-        self.lookup.remove(&T::id());
+        self.lookup.remove(&T::resource_id());
         ret
     }
 
@@ -236,7 +236,7 @@ impl ComponentRegistry {
     }
 
     fn index<T: Component>(&self) -> Option<usize> {
-        self.lookup.get(&T::id()).copied()
+        self.lookup.get(&T::resource_id()).copied()
     }
 }
 

@@ -24,7 +24,7 @@ impl SystemGraph {
         }
     }
 
-    pub fn init_systems(&mut self, world: &World) {
+    pub fn init_systems(&mut self, world: &mut World) {
         self.systems
             .iter_mut()
             .filter(|s| !s.system.is_init())

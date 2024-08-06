@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub enum AppEvent {
     CloseRequested,
     WillClose,
@@ -6,4 +7,3 @@ pub enum AppEvent {
     ResumeRequested,
     Resumed,
 }
-

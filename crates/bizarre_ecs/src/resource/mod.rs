@@ -13,11 +13,11 @@ pub mod resource_commands;
 pub struct ResourceId(TypeId);
 
 pub trait Resource: 'static {
-    fn id() -> ResourceId {
+    fn resource_id() -> ResourceId {
         ResourceId(TypeId::of::<Self>())
     }
 
-    fn name() -> &'static str {
+    fn resource_name() -> &'static str {
         type_name::<Self>()
     }
 }
@@ -32,8 +32,8 @@ pub struct ResourceMeta {
 impl ResourceMeta {
     pub fn new<T: Resource>() -> Self {
         Self {
-            name: T::name(),
-            id: T::id(),
+            name: T::resource_name(),
+            id: T::resource_id(),
             size: size_of::<T>(),
             drop_fn: |ptr| {
                 let ptr = ptr.cast::<T>();
@@ -103,8 +103,8 @@ pub trait IntoStored {
 impl<T: Resource> IntoStored for T {
     fn into_stored(self) -> StoredResource {
         StoredResource {
-            id: T::id(),
-            name: T::name(),
+            id: T::resource_id(),
+            name: T::resource_name(),
             data: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(self)).cast()) },
             drop_fn: |ptr| {
                 let ptr = ptr.cast::<T>();
@@ -133,8 +133,8 @@ pub struct ComponentBuffer {
 impl ComponentBuffer {
     pub fn with_capacity<T: Resource>(capacity: usize) -> Self {
         Self {
-            id: T::id(),
-            name: T::name(),
+            id: T::resource_id(),
+            name: T::resource_name(),
             item_size: size_of::<T>(),
             drop_fn: |item| {
                 let item: T = unsafe { item.cast().read() };
