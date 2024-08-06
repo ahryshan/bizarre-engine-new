@@ -11,6 +11,7 @@ use crate::{
 
 pub mod functional_system;
 pub mod schedule;
+pub mod system_commands;
 pub mod system_config;
 pub mod system_graph;
 pub mod system_param;

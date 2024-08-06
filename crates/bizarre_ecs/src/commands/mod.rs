@@ -8,7 +8,12 @@ use crate::{
     },
     prelude::Resource,
     resource::resource_commands::{InsertResourceCmd, RemoveResourceCmd},
-    system::system_param::SystemParam,
+    system::{
+        schedule::{self, Schedule},
+        system_commands::AddSystemsCmd,
+        system_config::IntoSystemConfigs,
+        system_param::SystemParam,
+    },
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -48,6 +53,16 @@ impl<'s> Commands<'s> {
 
     pub fn remove_resource<T: Resource>(&mut self) -> &mut Self {
         self.buffer.push(RemoveResourceCmd::<T>::new());
+        self
+    }
+
+    pub fn add_systems<M>(
+        &mut self,
+        schedule: Schedule,
+        systems: impl IntoSystemConfigs<M>,
+    ) -> &mut Self {
+        self.buffer
+            .push(AddSystemsCmd::new(schedule, systems.into_system_configs()));
         self
     }
 }
