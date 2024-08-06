@@ -65,6 +65,10 @@ impl<'s> Commands<'s> {
             .push(AddSystemsCmd::new(schedule, systems.into_system_configs()));
         self
     }
+
+    pub fn custom_command(&mut self, command: impl Command) {
+        self.buffer.push(command);
+    }
 }
 
 impl SystemParam for Commands<'_> {
