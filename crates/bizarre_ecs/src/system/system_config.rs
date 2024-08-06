@@ -1,4 +1,4 @@
-use std::any::type_name;
+use std::{any::type_name, fmt::Debug};
 
 use bizarre_utils::mass_impl;
 
@@ -6,10 +6,10 @@ use super::{system_graph::SystemGraph, IntoSystem, System, WorldAccess};
 
 #[derive(Debug, Clone)]
 pub struct SystemMeta {
-    name: &'static str,
-    before: Vec<&'static str>,
-    after: Vec<&'static str>,
-    access: Box<[WorldAccess]>,
+    pub(crate) name: &'static str,
+    pub(crate) before: Vec<&'static str>,
+    pub(crate) after: Vec<&'static str>,
+    pub(crate) access: Box<[WorldAccess]>,
 }
 
 impl SystemMeta {
@@ -28,6 +28,16 @@ pub struct SystemConfig {
     pub system: Box<dyn System>,
 }
 
+impl Debug for SystemConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemConfig")
+            .field("meta", &self.meta)
+            .field("system", &"BoxedSystem")
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 pub enum SystemConfigs {
     Config(SystemConfig),
     Configs(Vec<SystemConfigs>),
@@ -37,7 +47,7 @@ impl SystemConfigs {
     pub fn names(&self) -> Vec<&'static str> {
         match self {
             SystemConfigs::Config(conf) => vec![conf.meta.name],
-            SystemConfigs::Configs(confs) => confs.iter().map(|c| c.names()).flatten().collect(),
+            SystemConfigs::Configs(confs) => confs.iter().flat_map(|c| c.names()).collect(),
         }
     }
 

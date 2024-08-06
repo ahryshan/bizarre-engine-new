@@ -21,6 +21,10 @@ impl Default for EventQueue {
 }
 
 impl EventQueue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn create_reader(&mut self) -> EventReader {
         let id = self.next_reader_id;
         self.next_reader_id += 1;
@@ -46,7 +50,7 @@ impl EventQueue {
         Ok(())
     }
 
-    pub fn push_event<E>(&mut self, event: E) -> Result<()>
+    pub fn push_event<E>(&mut self, event: E)
     where
         E: Event,
     {
@@ -57,25 +61,20 @@ impl EventQueue {
             q.push_event(event);
             self.queues.insert(TypeId::of::<E>(), q);
         }
-        Ok(())
     }
 
-    pub fn poll_event<E>(&mut self, reader: &EventReader) -> Result<Option<&E>>
+    pub fn poll_event<E>(&mut self, reader: &EventReader) -> Option<&E>
     where
         E: Event,
     {
-        self.get_queue_mut::<E>()
-            .ok_or(anyhow!("Cannot poll events: There is no queue to read"))
-            .map(|q| q.poll_event(reader))?
+        self.get_queue_mut::<E>()?.poll_event(reader)
     }
 
-    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Result<Option<Box<[E]>>>
+    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Option<Box<[E]>>
     where
         E: Event + Clone,
     {
-        self.get_queue_mut::<E>()
-            .ok_or(anyhow!("Cannot pull events: There is no queue to read"))
-            .map(|q| q.pull_events(reader))?
+        self.get_queue_mut::<E>()?.pull_events(reader)
     }
 
     pub fn change_frames(&mut self) {

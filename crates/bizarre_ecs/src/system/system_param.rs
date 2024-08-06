@@ -35,6 +35,24 @@ pub trait SystemParam {
     }
 }
 
+impl SystemParam for () {
+    type Item<'w, 's> = ();
+
+    type State = ();
+
+    unsafe fn init(_: UnsafeWorldCell) -> Self::State {}
+
+    unsafe fn get_item<'w, 's>(_: UnsafeWorldCell<'w>, _: &'s mut Self::State) -> Self::Item<'w, 's>
+    where
+        Self: Sized,
+    {
+    }
+
+    fn param_access() -> Vec<WorldAccess> {
+        vec![]
+    }
+}
+
 pub type SystemParamItem<'w, 's, P> = <P as SystemParam>::Item<'w, 's>;
 pub type SystemParamState<P> = <P as SystemParam>::State;
 

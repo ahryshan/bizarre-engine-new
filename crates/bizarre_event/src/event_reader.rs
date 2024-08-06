@@ -68,9 +68,7 @@ impl<T: Event> SystemParam for Events<T> {
         let events = world
             .resource_mut::<EventQueue>()
             .unwrap()
-            .pull_events(param_state)
-            .map_err(|err| panic!("Could not pull events `{}`: {err}", type_name::<T>()))
-            .unwrap();
+            .pull_events(param_state);
 
         Events { events }
     }

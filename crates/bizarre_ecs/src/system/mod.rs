@@ -130,7 +130,7 @@ mod tests {
 
         sg.add_systems(delta_time_system);
 
-        sg.init_systems(&world);
+        sg.init_systems(&mut world);
         sg.run_systems(&mut world);
         sg.run_systems(&mut world);
         sg.run_systems(&mut world);

@@ -615,7 +615,7 @@ impl WindowTrait for X11Window {
                                 position: *position,
                             };
                             self.position = *position;
-                            event_queue.push_event(event)?;
+                            event_queue.push_event(event);
                         }
 
                         if size != &self.size {
@@ -624,7 +624,7 @@ impl WindowTrait for X11Window {
                                 size: *size,
                             };
                             self.size = *size;
-                            event_queue.push_event(event)?;
+                            event_queue.push_event(event);
                         }
                     }
                     WindowEvent::X11ClientMessage {
@@ -634,17 +634,17 @@ impl WindowTrait for X11Window {
                         if atom == &self.atoms.delete_window.resource_id() {
                             self.close_requested = true;
                             let event = WindowEvent::WindowClosed(*handle);
-                            event_queue.push_event(event)?;
+                            event_queue.push_event(event);
                         } else {
-                            event_queue.push_event(ev.clone())?;
+                            event_queue.push_event(ev.clone());
                         }
                     }
 
                     WindowEvent::WindowClosed(..) => {
                         self.close_requested = true;
-                        event_queue.push_event(ev.clone())?
+                        event_queue.push_event(ev.clone())
                     }
-                    _ => event_queue.push_event(ev.clone())?,
+                    _ => event_queue.push_event(ev.clone()),
                 }
                 Ok(())
             })

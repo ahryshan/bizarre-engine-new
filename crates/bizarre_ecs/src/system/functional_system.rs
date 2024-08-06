@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{any::type_name, marker::PhantomData};
 
 use bizarre_utils::mass_impl;
 
@@ -16,6 +16,21 @@ pub trait FnSys<Marker> {
     type Param: SystemParam;
 
     fn run(&mut self, param_value: SystemParamItem<Self::Param>);
+}
+
+impl<F> FnSys<fn()> for F
+where
+    for<'a> &'a mut F: FnMut(),
+{
+    type Param = ();
+
+    fn run(&mut self, _: SystemParamItem<Self::Param>) {
+        fn call_inner(mut f: impl FnMut()) {
+            f()
+        }
+
+        call_inner(self)
+    }
 }
 
 pub struct FunctionalSystem<Marker, F>
