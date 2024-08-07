@@ -1,11 +1,12 @@
 use std::fmt::Debug;
 
-use anyhow::{anyhow, Result};
+use bizarre_event::{EventQueue, EventReader};
 use nalgebra_glm::{IVec2, UVec2};
 use xcb::{x, Xid};
 
 use crate::{
     window::{WindowHandle, WindowMode, WindowTrait},
+    window_error::{WindowError, WindowResult},
     window_events::WindowEvent,
     WindowCreateInfo,
 };
@@ -32,7 +33,6 @@ xcb::atoms_struct! {
     }
 }
 
-#[derive(Debug)]
 pub struct X11Window {
     pub(crate) size: UVec2,
     pub(crate) position: IVec2,
@@ -45,11 +45,12 @@ pub struct X11Window {
     pub(crate) maximized: bool,
     pub(crate) mapped: bool,
     pub(crate) close_requested: bool,
+    pub(crate) event_reader: Option<EventReader>,
     pub(crate) __no_wm_state_add_remove: bool,
 }
 
 impl X11Window {
-    fn get_full_property<P>(&self, prop: x::Atom, prop_type: x::Atom) -> anyhow::Result<Vec<P>>
+    fn get_full_property<P>(&self, prop: x::Atom, prop_type: x::Atom) -> WindowResult<Vec<P>>
     where
         P: x::PropEl + Debug + Copy + Clone,
     {
@@ -97,7 +98,7 @@ impl X11Window {
             .collect()
     }
 
-    fn remove_wm_state(&self, to_remove: &[x::Atom]) -> anyhow::Result<()> {
+    fn remove_wm_state(&self, to_remove: &[x::Atom]) -> WindowResult<()> {
         if self.__no_wm_state_add_remove {
             let props = self.get_full_property::<x::Atom>(self.atoms.wm_state, x::ATOM_ATOM)?;
             let filtered = Self::filter_props(&props, to_remove);
@@ -145,7 +146,7 @@ impl X11Window {
         }
     }
 
-    fn add_wm_state(&self, to_add: &[x::Atom]) -> anyhow::Result<()> {
+    fn add_wm_state(&self, to_add: &[x::Atom]) -> WindowResult<()> {
         if self.__no_wm_state_add_remove {
             let conn = &get_x11_context().conn;
             conn.check_request(conn.send_request_checked(&x::ChangeProperty {
@@ -194,7 +195,7 @@ impl X11Window {
 }
 
 impl WindowTrait for X11Window {
-    fn new(create_info: &WindowCreateInfo) -> anyhow::Result<Self>
+    fn new(create_info: &WindowCreateInfo) -> WindowResult<Self>
     where
         Self: Sized,
     {
@@ -310,13 +311,17 @@ impl WindowTrait for X11Window {
         };
 
         conn.check_request(create_cookie)
-            .map_err(|err| anyhow!("Failed to create window: {err}"))?;
+            .map_err(WindowError::from)?;
         conn.check_request(rename_cookie)
-            .map_err(|err| anyhow!("Failed to change window title: {err}"))?;
-        conn.check_request(window_delete_cookie)?;
-        conn.check_request(decorations_cookie)?;
-        conn.check_request(wm_state_cookie)?;
-        conn.check_request(wm_allowed_actions_cookie)?;
+            .map_err(WindowError::from)?;
+        conn.check_request(window_delete_cookie)
+            .map_err(WindowError::from)?;
+        conn.check_request(decorations_cookie)
+            .map_err(WindowError::from)?;
+        conn.check_request(wm_state_cookie)
+            .map_err(WindowError::from)?;
+        conn.check_request(wm_allowed_actions_cookie)
+            .map_err(WindowError::from)?;
 
         let geometry = conn.wait_for_reply(window_geometry_cookie)?;
 
@@ -332,6 +337,7 @@ impl WindowTrait for X11Window {
             minimized: create_info.minimized,
             close_requested: false,
             atoms,
+            event_reader: None,
             __no_wm_state_add_remove,
         };
 
@@ -342,7 +348,7 @@ impl WindowTrait for X11Window {
         self.size
     }
 
-    fn update_size_and_position(&mut self) -> anyhow::Result<(UVec2, IVec2)> {
+    fn update_size_and_position(&mut self) -> WindowResult<(UVec2, IVec2)> {
         let conn = &get_x11_context().conn;
         let geometry = conn.wait_for_reply(conn.send_request(&x::GetGeometry {
             drawable: x::Drawable::Window(self.id),
@@ -365,7 +371,7 @@ impl WindowTrait for X11Window {
         self.mode
     }
 
-    fn set_size(&mut self, size: UVec2) -> anyhow::Result<()> {
+    fn set_size(&mut self, size: UVec2) -> WindowResult<()> {
         if self.size == size {
             return Ok(());
         }
@@ -386,7 +392,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn set_position(&mut self, position: IVec2) -> anyhow::Result<()> {
+    fn set_position(&mut self, position: IVec2) -> WindowResult<()> {
         if self.position == position {
             return Ok(());
         }
@@ -407,7 +413,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn set_mode(&mut self, mode: crate::window::WindowMode) -> anyhow::Result<()> {
+    fn set_mode(&mut self, mode: crate::window::WindowMode) -> WindowResult<()> {
         let conn = &get_x11_context().conn;
 
         let was_mapped = self.mapped;
@@ -450,7 +456,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn map(&mut self) -> anyhow::Result<()> {
+    fn map(&mut self) -> WindowResult<()> {
         if self.mapped {
             return Ok(());
         }
@@ -463,7 +469,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn unmap(&mut self) -> anyhow::Result<()> {
+    fn unmap(&mut self) -> WindowResult<()> {
         if !self.mapped {
             return Ok(());
         }
@@ -488,7 +494,7 @@ impl WindowTrait for X11Window {
         &self.title
     }
 
-    fn set_title(&mut self, title: String) -> anyhow::Result<()> {
+    fn set_title(&mut self, title: String) -> WindowResult<()> {
         if self.title == title {
             return Ok(());
         }
@@ -503,13 +509,12 @@ impl WindowTrait for X11Window {
             property: x::ATOM_WM_NAME,
         });
 
-        conn.check_request(cookie)
-            .map_err(|err| anyhow!("Failed to change window title: {err}"))?;
+        conn.check_request(cookie).map_err(WindowError::from)?;
 
         Ok(())
     }
 
-    fn minimize(&mut self) -> anyhow::Result<()> {
+    fn minimize(&mut self) -> WindowResult<()> {
         let conn = &get_x11_context().conn;
         let cookie = conn.send_request_checked(&x::ChangeProperty {
             property: self.atoms.wm_state,
@@ -530,7 +535,7 @@ impl WindowTrait for X11Window {
         }
     }
 
-    fn restore(&mut self) -> anyhow::Result<()> {
+    fn restore(&mut self) -> WindowResult<()> {
         let wm_state = self.get_full_property(self.atoms.wm_state, x::ATOM_ATOM)?;
         let wm_state = Self::filter_props(&wm_state, &[self.atoms.wm_state_hidden]);
         let conn = &get_x11_context().conn;
@@ -545,7 +550,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn maximize(&mut self) -> anyhow::Result<()> {
+    fn maximize(&mut self) -> WindowResult<()> {
         self.add_wm_state(&[self.atoms.wm_state_maxv, self.atoms.wm_state_maxh])?;
         let wm_state = self.get_full_property::<x::Atom>(self.atoms.wm_state, x::ATOM_ATOM)?;
         println!("wm_state: {wm_state:?}");
@@ -553,7 +558,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn unmaximize(&mut self) -> anyhow::Result<()> {
+    fn unmaximize(&mut self) -> WindowResult<()> {
         self.remove_wm_state(&[self.atoms.wm_state_maxv, self.atoms.wm_state_maxh])?;
         let wm_state = self.get_full_property::<x::Atom>(self.atoms.wm_state, x::ATOM_ATOM)?;
         println!("wm_state: {wm_state:?}");
@@ -561,7 +566,7 @@ impl WindowTrait for X11Window {
         Ok(())
     }
 
-    fn set_decorations(&mut self, decorations: bool) -> anyhow::Result<()> {
+    fn set_decorations(&mut self, decorations: bool) -> WindowResult<()> {
         let hints = if decorations {
             MotifHints::default_decorations()
         } else {
@@ -586,71 +591,79 @@ impl WindowTrait for X11Window {
         self.close_requested
     }
 
-    fn drain_events_to_queue(
-        &mut self,
-        event_queue: &mut bizarre_event::EventQueue,
-    ) -> anyhow::Result<()> {
-        // TODO: Move this to some App system
-        get_x11_context_mut().drain_system_events()?;
+    fn handle_events(&mut self, eq: &mut EventQueue) -> WindowResult<()> {
+        let reader = self.event_reader.get_or_insert_with(|| {
+            let reader = eq.create_reader();
+            eq.register_reader::<WindowEvent>(reader);
+            reader
+        });
 
-        let context_queue = &mut get_x11_context_mut().event_queue;
-        let events = context_queue.get_events_for_window(self.handle());
-
-        if let None = events {
-            return Ok(());
+        if let Some(events) = eq.pull_events::<WindowEvent>(reader) {
+            events
+                .into_iter()
+                .map(|ev| self.handle_window_event(ev))
+                .flatten()
+                .flatten()
+                .for_each(|ev| eq.push_event(ev))
         }
 
-        (*events.unwrap())
-            .iter()
-            .map(|ev| {
-                match ev {
-                    WindowEvent::X11ConfigureNotify {
-                        handle,
-                        position,
-                        size,
-                    } => {
-                        if position != &self.position {
-                            let event = WindowEvent::WindowMoved {
-                                handle: *handle,
-                                position: *position,
-                            };
-                            self.position = *position;
-                            event_queue.push_event(event);
-                        }
-
-                        if size != &self.size {
-                            let event = WindowEvent::WindowResized {
-                                handle: *handle,
-                                size: *size,
-                            };
-                            self.size = *size;
-                            event_queue.push_event(event);
-                        }
-                    }
-                    WindowEvent::X11ClientMessage {
-                        handle,
-                        data: x::ClientMessageData::Data32([atom, ..]),
-                    } => {
-                        if atom == &self.atoms.delete_window.resource_id() {
-                            self.close_requested = true;
-                            let event = WindowEvent::WindowClosed(*handle);
-                            event_queue.push_event(event);
-                        } else {
-                            event_queue.push_event(ev.clone());
-                        }
-                    }
-
-                    WindowEvent::WindowClosed(..) => {
-                        self.close_requested = true;
-                        event_queue.push_event(ev.clone())
-                    }
-                    _ => event_queue.push_event(ev.clone()),
-                }
-                Ok(())
-            })
-            .collect::<Result<Vec<_>>>()?;
-
         Ok(())
+    }
+}
+
+impl X11Window {
+    fn handle_window_event(&mut self, event: &WindowEvent) -> Option<Vec<WindowEvent>> {
+        let mut output = vec![];
+
+        match event {
+            WindowEvent::X11ConfigureNotify {
+                handle,
+                position,
+                size,
+            } => {
+                if position != &self.position {
+                    let event = WindowEvent::WindowMoved {
+                        handle: *handle,
+                        position: *position,
+                    };
+                    self.position = *position;
+                    output.push(event);
+                }
+
+                if size != &self.size {
+                    let event = WindowEvent::WindowResized {
+                        handle: *handle,
+                        size: *size,
+                    };
+                    self.size = *size;
+                    output.push(event);
+                }
+            }
+            WindowEvent::X11ClientMessage {
+                handle,
+                data: x::ClientMessageData::Data32([atom, ..]),
+            } => {
+                if atom == &self.atoms.delete_window.resource_id() {
+                    self.close_requested = true;
+                    let event = WindowEvent::WindowClosed(*handle);
+                    output.push(event);
+                } else {
+                    output.push(event.clone());
+                }
+            }
+
+            WindowEvent::WindowClosed(..) => {
+                self.close_requested = true;
+                output.push(event.clone());
+            }
+            _ => output.push(event.clone()),
+        }
+
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
+        }
     }
 }
 

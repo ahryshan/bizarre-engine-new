@@ -1,13 +1,22 @@
 use std::sync::Once;
 
 use anyhow::Result;
+use bizarre_event::EventQueue;
+use nalgebra_glm::{IVec2, UVec2};
+use thiserror::Error;
+use xcb::{x, Xid};
+
+use crate::{
+    window_error::{WindowError, WindowResult},
+    window_events::WindowEvent,
+    WindowHandle,
+};
 
 use super::x11_event_queue::X11EventQueue;
 
 pub struct X11Context {
     pub conn: xcb::Connection,
     pub screen_num: i32,
-    pub event_queue: X11EventQueue,
 }
 
 static mut CONTEXT: Option<X11Context> = None;
@@ -20,7 +29,6 @@ fn init_x11_context() {
             .map(|(connection, screen_num)| X11Context {
                 conn: connection,
                 screen_num,
-                event_queue: Default::default(),
             })
             .unwrap()
             .into();
@@ -40,11 +48,62 @@ pub fn get_x11_context_mut() -> &'static mut X11Context {
 }
 
 impl X11Context {
-    pub fn drain_system_events(&mut self) -> Result<()> {
-        while let Some(xcb_event) = self.conn.poll_for_event()? {
-            self.event_queue.handle_event(xcb_event);
+    pub fn drain_system_events(&mut self, event_queue: &mut EventQueue) -> WindowResult<()> {
+        while let Some(xcb_event) = self.conn.poll_for_event().map_err(WindowError::from)? {
+            match WindowEvent::try_from(xcb_event) {
+                Ok(ev) => event_queue.push_event(ev),
+                Err(X11WindowEventConvertError::NotAWindowEvent(ev)) => {
+                    println!("Unhandled X11 event: {ev:?}")
+                }
+            }
         }
 
         Ok(())
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum X11WindowEventConvertError {
+    #[error(
+        "The provided event cannot be converted to WindowEvent: it's not a window event ({0:?})"
+    )]
+    NotAWindowEvent(xcb::Event),
+}
+
+impl TryFrom<xcb::Event> for WindowEvent {
+    type Error = X11WindowEventConvertError;
+
+    fn try_from(xcb_event: xcb::Event) -> Result<Self, Self::Error> {
+        match xcb_event {
+            xcb::Event::X(ref ev) => match ev {
+                x::Event::ConfigureNotify(ev) => {
+                    let handle = WindowHandle::from_raw(ev.window().resource_id());
+                    let x = ev.x();
+                    let y = ev.y();
+                    let width = ev.width();
+                    let height = ev.height();
+                    let size = UVec2::new(width as u32, height as u32);
+                    let position = IVec2::new(x as i32, y as i32);
+                    Ok(Self::X11ConfigureNotify {
+                        handle,
+                        size,
+                        position,
+                    })
+                }
+                x::Event::DestroyNotify(ev) => {
+                    let handle = WindowHandle::from_raw(ev.window().resource_id());
+                    Ok(Self::WindowClosed(handle))
+                }
+                x::Event::ClientMessage(ev) => {
+                    let handle = WindowHandle::from_raw(ev.window().resource_id());
+                    Ok(Self::X11ClientMessage {
+                        handle,
+                        data: ev.data(),
+                    })
+                }
+                _ => Err(Self::Error::NotAWindowEvent(xcb_event)),
+            },
+            _ => Err(Self::Error::NotAWindowEvent(xcb_event)),
+        }
     }
 }

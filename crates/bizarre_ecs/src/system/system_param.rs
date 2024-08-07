@@ -159,61 +159,6 @@ impl<T: Resource> DerefMut for ResMut<'_, T> {
     }
 }
 
-pub trait FromWorld {
-    fn from_world(world: &mut World) -> Self;
-}
-
-impl<T: Default> FromWorld for T {
-    fn from_world(_: &mut World) -> Self {
-        Self::default()
-    }
-}
-
-pub struct Local<'s, T> {
-    value: &'s mut T,
-}
-
-impl<T> SystemParam for Local<'_, T>
-where
-    T: 'static + FromWorld,
-{
-    type Item<'w, 's> = Local<'s, T>;
-
-    type State = T;
-
-    unsafe fn init(world: UnsafeWorldCell) -> Self::State {
-        T::from_world(world.unsafe_world_mut())
-    }
-
-    unsafe fn get_item<'w, 's>(
-        _: UnsafeWorldCell<'w>,
-        state: &'s mut Self::State,
-    ) -> Self::Item<'w, 's>
-    where
-        Self: Sized,
-    {
-        Local { value: state }
-    }
-
-    fn param_access() -> Vec<WorldAccess> {
-        vec![]
-    }
-}
-
-impl<T> Deref for Local<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
-}
-
-impl<T> DerefMut for Local<'_, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value
-    }
-}
-
 macro_rules! impl_system_param {
     ($($param:tt),+) => {
         #[allow(non_snake_case)]

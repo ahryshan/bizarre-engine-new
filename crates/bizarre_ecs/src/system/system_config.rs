@@ -2,7 +2,7 @@ use std::{any::type_name, fmt::Debug};
 
 use bizarre_utils::mass_impl;
 
-use super::{system_graph::SystemGraph, IntoSystem, System, WorldAccess};
+use super::{IntoSystem, System, WorldAccess};
 
 #[derive(Debug, Clone)]
 pub struct SystemMeta {

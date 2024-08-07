@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::atomic::Ordering};
 
+use ecs_module::EcsModule;
 use unsafe_world_cell::UnsafeWorldCell;
 
 use crate::{
@@ -10,6 +11,7 @@ use crate::{
     system::{schedule::Schedule, system_config::IntoSystemConfigs, system_graph::SystemGraph},
 };
 
+pub mod ecs_module;
 pub mod unsafe_world_cell;
 
 #[derive(Default)]
@@ -131,7 +133,7 @@ impl World {
         F: FnOnce(&mut World, &mut SystemGraph) -> T,
     {
         let mut sg = self.schedules.remove(&schedule).unwrap_or_else(|| {
-            panic!("Trying to run `{schedule:?}` but the `World` does not have this one")
+            panic!("Trying to access `{schedule:?}` but the `World` does not have this one")
         });
 
         let ret = func(self, &mut sg);
@@ -153,6 +155,10 @@ impl World {
 
     pub fn add_systems<M>(&mut self, schedule: Schedule, systems: impl IntoSystemConfigs<M>) {
         self.with_schedule(schedule, |_, sg| sg.add_systems(systems));
+    }
+
+    pub fn add_module(&mut self, module: impl EcsModule) {
+        module.apply(self);
     }
 
     pub unsafe fn as_unsafe_cell(&self) -> UnsafeWorldCell {

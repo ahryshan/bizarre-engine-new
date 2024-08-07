@@ -1,6 +1,13 @@
 use std::sync::LazyLock;
 
-use crate::WindowTrait;
+use bizarre_event::EventQueue;
+use nalgebra_glm::UVec2;
+
+use crate::{
+    window::{WindowHandle, WindowStatus},
+    window_error::WindowResult,
+    WindowMode, WindowTrait,
+};
 
 #[cfg(feature = "wayland")]
 use super::wayland::wayland_window::WaylandWindow;
@@ -50,7 +57,7 @@ static DISPLAY: LazyLock<__Display> = LazyLock::new(|| {
 });
 
 impl WindowTrait for LinuxWindow {
-    fn new(create_info: &crate::WindowCreateInfo) -> anyhow::Result<Self>
+    fn new(create_info: &crate::WindowCreateInfo) -> WindowResult<Self>
     where
         Self: Sized,
     {
@@ -67,7 +74,7 @@ impl WindowTrait for LinuxWindow {
         Ok(Self { inner })
     }
 
-    fn size(&self) -> nalgebra_glm::UVec2 {
+    fn size(&self) -> UVec2 {
         self.inner.size()
     }
 
@@ -75,13 +82,11 @@ impl WindowTrait for LinuxWindow {
         self.inner.position()
     }
 
-    fn update_size_and_position(
-        &mut self,
-    ) -> anyhow::Result<(nalgebra_glm::UVec2, nalgebra_glm::IVec2)> {
+    fn update_size_and_position(&mut self) -> WindowResult<(UVec2, nalgebra_glm::IVec2)> {
         self.inner.update_size_and_position()
     }
 
-    fn mode(&self) -> crate::WindowMode {
+    fn mode(&self) -> WindowMode {
         self.inner.mode()
     }
 
@@ -89,7 +94,7 @@ impl WindowTrait for LinuxWindow {
         self.inner.raw_handle()
     }
 
-    fn handle(&self) -> crate::window::WindowHandle {
+    fn handle(&self) -> WindowHandle {
         self.inner.handle()
     }
 
@@ -97,51 +102,51 @@ impl WindowTrait for LinuxWindow {
         self.inner.title()
     }
 
-    fn status(&self) -> crate::window::WindowStatus {
+    fn status(&self) -> WindowStatus {
         self.inner.status()
     }
 
-    fn set_size(&mut self, size: nalgebra_glm::UVec2) -> anyhow::Result<()> {
+    fn set_size(&mut self, size: UVec2) -> WindowResult<()> {
         self.inner.set_size(size)
     }
 
-    fn set_position(&mut self, position: nalgebra_glm::IVec2) -> anyhow::Result<()> {
+    fn set_position(&mut self, position: nalgebra_glm::IVec2) -> WindowResult<()> {
         self.inner.set_position(position)
     }
 
-    fn set_mode(&mut self, mode: crate::WindowMode) -> anyhow::Result<()> {
+    fn set_mode(&mut self, mode: WindowMode) -> WindowResult<()> {
         self.inner.set_mode(mode)
     }
 
-    fn set_title(&mut self, title: String) -> anyhow::Result<()> {
+    fn set_title(&mut self, title: String) -> WindowResult<()> {
         self.inner.set_title(title)
     }
 
-    fn set_decorations(&mut self, decorations: bool) -> anyhow::Result<()> {
+    fn set_decorations(&mut self, decorations: bool) -> WindowResult<()> {
         self.inner.set_decorations(decorations)
     }
 
-    fn map(&mut self) -> anyhow::Result<()> {
+    fn map(&mut self) -> WindowResult<()> {
         self.inner.map()
     }
 
-    fn unmap(&mut self) -> anyhow::Result<()> {
+    fn unmap(&mut self) -> WindowResult<()> {
         self.inner.unmap()
     }
 
-    fn minimize(&mut self) -> anyhow::Result<()> {
+    fn minimize(&mut self) -> WindowResult<()> {
         self.inner.minimize()
     }
 
-    fn restore(&mut self) -> anyhow::Result<()> {
+    fn restore(&mut self) -> WindowResult<()> {
         self.inner.restore()
     }
 
-    fn maximize(&mut self) -> anyhow::Result<()> {
+    fn maximize(&mut self) -> WindowResult<()> {
         self.inner.maximize()
     }
 
-    fn unmaximize(&mut self) -> anyhow::Result<()> {
+    fn unmaximize(&mut self) -> WindowResult<()> {
         self.inner.unmaximize()
     }
 
@@ -149,10 +154,7 @@ impl WindowTrait for LinuxWindow {
         self.inner.close_requested()
     }
 
-    fn drain_events_to_queue(
-        &mut self,
-        event_queue: &mut bizarre_event::EventQueue,
-    ) -> anyhow::Result<()> {
-        self.inner.drain_events_to_queue(event_queue)
+    fn handle_events(&mut self, event_queue: &mut EventQueue) -> WindowResult<()> {
+        self.inner.handle_events(event_queue)
     }
 }

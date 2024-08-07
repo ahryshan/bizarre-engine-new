@@ -15,7 +15,12 @@ pub mod world;
 pub mod prelude {
     pub use crate::{
         component::Component,
+        query::Query,
         resource::{Resource, ResourceId},
-        system::IntoSystem,
+        system::{
+            local::{FromWorld, Local},
+            system_param::{Res, ResMut},
+            IntoSystem, System,
+        },
     };
 }

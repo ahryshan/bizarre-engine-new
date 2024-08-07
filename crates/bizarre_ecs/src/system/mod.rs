@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub mod functional_system;
+pub mod local;
 pub mod schedule;
 pub mod system_commands;
 pub mod system_config;

@@ -13,60 +13,27 @@ use bizarre_event::{EventQueue, EventReader};
 use crate::app_event::AppEvent;
 
 pub struct App {
-    name: String,
-    running: bool,
-    paused: bool,
-    world: World,
-    event_reader: EventReader,
+    pub(crate) name: String,
+    pub(crate) running: bool,
+    pub(crate) paused: bool,
+    pub(crate) world: World,
+    pub(crate) event_reader: EventReader,
 
     #[cfg(target_os = "linux")]
-    termination_receiver: Receiver<i32>,
+    pub(crate) termination_receiver: Receiver<i32>,
 }
 
 impl App {
-    pub fn new(name: String) -> Self {
-        let mut world = World::new();
-
-        let mut event_queue = EventQueue::new();
-        let event_reader = event_queue.create_reader();
-        event_queue.register_reader::<AppEvent>(event_reader);
-
-        world.insert_resource(event_queue);
-
-        world.add_schedule(Schedule::Init);
-        world.add_schedule(Schedule::Update);
-
-        world.add_systems(Schedule::Update, change_event_queue_frames);
-
-        #[cfg(target_os = "linux")]
-        let termination_receiver = Self::setup_termination_handler();
-
-        Self {
-            name,
-            running: false,
-            paused: false,
-            world,
-            event_reader,
-
-            #[cfg(target_os = "linux")]
-            termination_receiver,
-        }
-    }
-
     pub fn run(&mut self) -> Result<()> {
         self.running = true;
 
         const FRAME_TARGET_TIME: Duration = Duration::from_millis(1000 / 60);
 
-        let mut frame = 0;
-
-        self.world.init_schedule(Schedule::Init);
-        self.world.run_schedule(Schedule::Init);
-
         while self.running {
             let frame_start = Instant::now();
 
-            frame += 1;
+            self.world.init_schedule(Schedule::Preupdate);
+            self.world.run_schedule(Schedule::Preupdate);
 
             self.process_app_events();
             self.world.init_schedule(Schedule::Update);
@@ -105,21 +72,4 @@ impl App {
             }
         }
     }
-
-    #[cfg(target_os = "linux")]
-    fn setup_termination_handler() -> Receiver<i32> {
-        let (tx, rx) = mpsc::channel();
-
-        ctrlc::set_handler(move || {
-            println!("GOT SIGTERM");
-            tx.send(0)
-                .unwrap_or_else(|_| panic!("Could not send termination signal"));
-        });
-
-        rx
-    }
-}
-
-pub fn change_event_queue_frames(mut eq: ResMut<EventQueue>) {
-    eq.change_frames();
 }
