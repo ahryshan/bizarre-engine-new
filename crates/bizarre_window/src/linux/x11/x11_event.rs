@@ -17,6 +17,28 @@ pub enum X11WindowEvent {
         handle: WindowHandle,
         data: x::ClientMessageData,
     },
+    KeyPress {
+        handle: WindowHandle,
+        keycode: u8,
+    },
+    KeyRelease {
+        handle: WindowHandle,
+        keycode: u8,
+    },
+    ButtonPress {
+        handle: WindowHandle,
+        pos: IVec2,
+        keycode: u8,
+    },
+    ButtonRelease {
+        handle: WindowHandle,
+        pos: IVec2,
+        keycode: u8,
+    },
+    MouseMove {
+        handle: WindowHandle,
+        pos: IVec2,
+    },
 }
 
 impl X11WindowEvent {
@@ -26,7 +48,12 @@ impl X11WindowEvent {
         match self {
             DestroyNotify { handle, .. }
             | ConfigureNotify { handle, .. }
-            | ClientMessage { handle, .. } => *handle,
+            | ClientMessage { handle, .. }
+            | KeyPress { handle, .. }
+            | KeyRelease { handle, .. }
+            | ButtonPress { handle, .. }
+            | ButtonRelease { handle, .. }
+            | MouseMove { handle, .. } => *handle,
         }
     }
 }

@@ -4,7 +4,7 @@ use anyhow::Result;
 use bizarre_event::EventQueue;
 use nalgebra_glm::{IVec2, UVec2};
 use thiserror::Error;
-use xcb::{x, Xid};
+use xcb::{x, xkb, Xid};
 
 use crate::{
     window_error::{WindowError, WindowResult},
@@ -50,8 +50,11 @@ pub fn get_x11_context_mut() -> &'static mut X11Context {
 impl X11Context {
     pub fn drain_system_events(&mut self, event_queue: &mut EventQueue) -> WindowResult<()> {
         while let Some(xcb_event) = self.conn.poll_for_event().map_err(WindowError::from)? {
-            if let Ok(ev) = X11WindowEvent::try_from(xcb_event) {
-                event_queue.push_event(ev)
+            match X11WindowEvent::try_from(xcb_event) {
+                Ok(ev) => event_queue.push_event(ev),
+                Err(X11WindowEventConvertError::NotAWindowEvent(ev)) => {
+                    println!("Unhandled X11 event: {ev:?}")
+                }
             }
         }
 
@@ -97,6 +100,41 @@ impl TryFrom<xcb::Event> for X11WindowEvent {
                         handle,
                         data: ev.data(),
                     })
+                }
+                x::Event::KeyPress(ev) => {
+                    let handle = WindowHandle::from_raw(ev.event().resource_id());
+                    let keycode = ev.detail();
+                    Ok(Self::KeyPress { handle, keycode })
+                }
+                x::Event::KeyRelease(ev) => {
+                    let handle = WindowHandle::from_raw(ev.event().resource_id());
+                    let keycode = ev.detail();
+                    Ok(Self::KeyRelease { handle, keycode })
+                }
+                x::Event::ButtonPress(ev) => {
+                    let handle = WindowHandle::from_raw(ev.event().resource_id());
+                    let pos = IVec2::new(ev.event_x() as i32, ev.event_y() as i32);
+                    let keycode = ev.detail();
+                    Ok(Self::ButtonPress {
+                        handle,
+                        pos,
+                        keycode,
+                    })
+                }
+                x::Event::ButtonRelease(ev) => {
+                    let handle = WindowHandle::from_raw(ev.event().resource_id());
+                    let pos = IVec2::new(ev.event_x() as i32, ev.event_y() as i32);
+                    let keycode = ev.detail();
+                    Ok(Self::ButtonRelease {
+                        handle,
+                        pos,
+                        keycode,
+                    })
+                }
+                x::Event::MotionNotify(ev) => {
+                    let handle = WindowHandle::from_raw(ev.event().resource_id());
+                    let pos = IVec2::new(ev.event_x() as i32, ev.event_y() as i32);
+                    Ok(Self::MouseMove { handle, pos })
                 }
                 _ => Err(Self::Error::NotAWindowEvent(xcb_event)),
             },

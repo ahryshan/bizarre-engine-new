@@ -225,6 +225,10 @@ impl PlatformWindow for X11Window {
                 x::Cw::EventMask(
                     x::EventMask::EXPOSURE
                         | x::EventMask::KEY_PRESS
+                        | x::EventMask::KEY_RELEASE
+                        | x::EventMask::BUTTON_PRESS
+                        | x::EventMask::BUTTON_RELEASE
+                        | x::EventMask::POINTER_MOTION
                         | x::EventMask::STRUCTURE_NOTIFY
                         | x::EventMask::SUBSTRUCTURE_NOTIFY,
                 ),
