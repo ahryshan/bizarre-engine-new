@@ -1,9 +1,15 @@
+use std::ops::{Deref, DerefMut};
+
 use anyhow::Result;
 use bizarre_core::Handle;
-use bizarre_event::EventQueue;
+use bizarre_event::{EventQueue, EventReader};
+use cfg_if::cfg_if;
 use nalgebra_glm::{IVec2, UVec2};
 
-use crate::{window_error::WindowResult, window_events::WindowEvent, Window, WindowCreateInfo};
+use crate::{
+    platform_window::PlatformWindow, window_error::WindowResult, window_events::WindowEvent,
+    WindowCreateInfo,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(u8)]
@@ -21,48 +27,44 @@ pub struct WindowStatus {
 
 pub type WindowHandle = Handle<Window>;
 
-pub trait WindowTrait {
-    fn new(create_info: &WindowCreateInfo) -> WindowResult<Self>
-    where
-        Self: Sized;
+pub struct Window {
+    handle: WindowHandle,
+    inner: Box<dyn PlatformWindow>,
+    event_reader: Option<EventReader>,
+}
 
-    /// Returns the internally saved size. The returned value may be stale, so in order
-    /// to retrieve the exact and actual values it's recommended to
-    /// use [WindowTrait::update_size_and_position]
-    fn size(&self) -> UVec2;
+impl Window {
+    pub fn new(create_info: &WindowCreateInfo) -> WindowResult<Self> {
+        let inner = {
+            cfg_if! {
+                if #[cfg(target_os = "linux")] {
+                    use crate::linux::linux_window::LinuxWindow;
 
-    /// Returns the internally saved position. The returned value may be stale, so in order
-    /// to retrieve the exact and actual values it's recommended to
-    /// use [WindowTrait::update_size_and_position]
-    fn position(&self) -> IVec2;
+                    Box::new(LinuxWindow::new(create_info)?)
+                } else {
+                    todo!("Only linux is supported at the moment")
+                }
+            }
+        };
 
-    /// Gets the exact size and position of the window from underlying API
-    /// and returns those new values.
-    /// May update the internally kept size and position with those new values.
-    ///
-    /// Returns `(size, position)`
-    fn update_size_and_position(&mut self) -> WindowResult<(UVec2, IVec2)>;
+        Ok(Self {
+            handle: inner.handle(),
+            inner,
+            event_reader: None,
+        })
+    }
+}
 
-    fn mode(&self) -> WindowMode;
-    fn raw_handle(&self) -> u32;
-    fn handle(&self) -> WindowHandle;
-    fn title(&self) -> &str;
+impl Deref for Window {
+    type Target = dyn PlatformWindow;
 
-    fn status(&self) -> WindowStatus;
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
 
-    fn set_size(&mut self, size: UVec2) -> WindowResult<()>;
-    fn set_position(&mut self, position: IVec2) -> WindowResult<()>;
-    fn set_mode(&mut self, mode: WindowMode) -> WindowResult<()>;
-    fn set_title(&mut self, title: String) -> WindowResult<()>;
-    fn set_decorations(&mut self, decorations: bool) -> WindowResult<()>;
-    fn map(&mut self) -> WindowResult<()>;
-    fn unmap(&mut self) -> WindowResult<()>;
-    fn minimize(&mut self) -> WindowResult<()>;
-    fn restore(&mut self) -> WindowResult<()>;
-    fn maximize(&mut self) -> WindowResult<()>;
-    fn unmaximize(&mut self) -> WindowResult<()>;
-
-    fn handle_events(&mut self, event_queue: &mut EventQueue) -> WindowResult<()>;
-
-    fn close_requested(&self) -> bool;
+impl DerefMut for Window {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.inner
+    }
 }

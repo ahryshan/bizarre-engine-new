@@ -4,9 +4,10 @@ use bizarre_event::EventQueue;
 use nalgebra_glm::UVec2;
 
 use crate::{
+    platform_window::PlatformWindow,
     window::{WindowHandle, WindowStatus},
     window_error::WindowResult,
-    WindowMode, WindowTrait,
+    WindowMode,
 };
 
 #[cfg(feature = "wayland")]
@@ -16,27 +17,27 @@ use super::wayland::wayland_window::WaylandWindow;
 use super::x11::x11_window::X11Window;
 
 pub struct LinuxWindow {
-    inner: Box<dyn WindowTrait>,
+    inner: Box<dyn PlatformWindow>,
 }
 
 #[derive(Clone, Copy, Debug)]
-enum __Display {
+pub enum __LinuxDisplay {
     X11,
     Wayland,
 }
 
-static DISPLAY: LazyLock<__Display> = LazyLock::new(|| {
+static DISPLAY: LazyLock<__LinuxDisplay> = LazyLock::new(|| {
     if let Ok(value) = std::env::var("__BE_FORCE_DISPLAY") {
         match value.as_str() {
             "x11" => {
                 #[cfg(not(feature = "x11"))]
                 panic!("Cannot run with __BE_FORCE_DISPLAY=x11 when X11 support is not included into the compilation");
-                __Display::X11
+                __LinuxDisplay::X11
             }
             "wayland" => {
                 #[cfg(not(feature = "wayland"))]
                 panic!("Cannot run with __BE_FORCE_DISPLAY=wayland when Wayland support is not included into the compilation");
-                __Display::Wayland
+                __LinuxDisplay::Wayland
             }
             _ => {
                 panic!("Unknown __BE_FORCE_DISPLAY value: {value}")
@@ -44,28 +45,32 @@ static DISPLAY: LazyLock<__Display> = LazyLock::new(|| {
         }
     } else if cfg!(all(feature = "wayland", feature = "x11")) {
         match std::env::var("WAYLAND_DISPLAY") {
-            Ok(_) => __Display::Wayland,
-            Err(_) => __Display::X11,
+            Ok(_) => __LinuxDisplay::Wayland,
+            Err(_) => __LinuxDisplay::X11,
         }
     } else if cfg!(all(feature = "wayland", not(feature = "x11"))) {
-        __Display::Wayland
+        __LinuxDisplay::Wayland
     } else if cfg!(all(feature = "x11", not(feature = "wayland"))) {
-        __Display::X11
+        __LinuxDisplay::X11
     } else {
         panic!("Failed to resolve display server!")
     }
 });
 
-impl WindowTrait for LinuxWindow {
+pub fn get_linux_display_type() -> __LinuxDisplay {
+    DISPLAY.clone()
+}
+
+impl PlatformWindow for LinuxWindow {
     fn new(create_info: &crate::WindowCreateInfo) -> WindowResult<Self>
     where
         Self: Sized,
     {
         let display = DISPLAY.clone();
-        let inner: Box<dyn WindowTrait> = match display {
-            __Display::X11 => Box::new(X11Window::new(create_info)?),
+        let inner: Box<dyn PlatformWindow> = match display {
+            __LinuxDisplay::X11 => Box::new(X11Window::new(create_info)?),
             #[cfg(feature = "wayland")]
-            __Display::Wayland => Box::new(WaylandWindow::new(create_info)?),
+            __LinuxDisplay::Wayland => Box::new(WaylandWindow::new(create_info)?),
             _ => panic!(
                 "Cannot create window, because support for display server not present: {display:?}"
             ),

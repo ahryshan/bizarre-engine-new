@@ -5,7 +5,8 @@ use nalgebra_glm::{IVec2, UVec2};
 use xcb::{x, Xid};
 
 use crate::{
-    window::{WindowHandle, WindowMode, WindowTrait},
+    platform_window::PlatformWindow,
+    window::{WindowHandle, WindowMode},
     window_error::{WindowError, WindowResult},
     window_events::WindowEvent,
     WindowCreateInfo,
@@ -14,6 +15,7 @@ use crate::{
 use super::{
     connection::{get_x11_context, get_x11_context_mut, X11Context},
     motif_hints::MotifHints,
+    x11_event::X11WindowEvent,
 };
 
 xcb::atoms_struct! {
@@ -194,7 +196,7 @@ impl X11Window {
     }
 }
 
-impl WindowTrait for X11Window {
+impl PlatformWindow for X11Window {
     fn new(create_info: &WindowCreateInfo) -> WindowResult<Self>
     where
         Self: Sized,
@@ -238,7 +240,6 @@ impl WindowTrait for X11Window {
         });
 
         let atoms = Atoms::intern_all(&conn)?;
-        println!("{atoms:#?}");
 
         let __no_wm_state_add_remove =
             atoms.wm_state_add == x::ATOM_NONE || atoms.wm_state_remove == x::ATOM_NONE;
@@ -594,15 +595,20 @@ impl WindowTrait for X11Window {
     fn handle_events(&mut self, eq: &mut EventQueue) -> WindowResult<()> {
         let reader = self.event_reader.get_or_insert_with(|| {
             let reader = eq.create_reader();
-            eq.register_reader::<WindowEvent>(reader);
+            eq.register_reader::<X11WindowEvent>(reader);
             reader
         });
 
-        if let Some(events) = eq.pull_events::<WindowEvent>(reader) {
+        if let Some(events) = eq.pull_events::<X11WindowEvent>(reader) {
             events
-                .into_iter()
-                .map(|ev| self.handle_window_event(ev))
-                .flatten()
+                .iter()
+                .filter_map(|ev| {
+                    if ev.window_handle() != self.handle() {
+                        None
+                    } else {
+                        self.handle_window_event(ev)
+                    }
+                })
                 .flatten()
                 .for_each(|ev| eq.push_event(ev))
         }
@@ -612,11 +618,11 @@ impl WindowTrait for X11Window {
 }
 
 impl X11Window {
-    fn handle_window_event(&mut self, event: &WindowEvent) -> Option<Vec<WindowEvent>> {
+    fn handle_window_event(&mut self, event: &X11WindowEvent) -> Option<Vec<WindowEvent>> {
         let mut output = vec![];
 
         match event {
-            WindowEvent::X11ConfigureNotify {
+            X11WindowEvent::ConfigureNotify {
                 handle,
                 position,
                 size,
@@ -639,7 +645,7 @@ impl X11Window {
                     output.push(event);
                 }
             }
-            WindowEvent::X11ClientMessage {
+            X11WindowEvent::ClientMessage {
                 handle,
                 data: x::ClientMessageData::Data32([atom, ..]),
             } => {
@@ -647,16 +653,14 @@ impl X11Window {
                     self.close_requested = true;
                     let event = WindowEvent::WindowClosed(*handle);
                     output.push(event);
-                } else {
-                    output.push(event.clone());
                 }
             }
 
-            WindowEvent::WindowClosed(..) => {
+            X11WindowEvent::DestroyNotify { handle, .. } => {
                 self.close_requested = true;
-                output.push(event.clone());
+                output.push(WindowEvent::WindowClosed(*handle));
             }
-            _ => output.push(event.clone()),
+            _ => {}
         }
 
         if output.is_empty() {

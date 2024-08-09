@@ -19,6 +19,7 @@ wl_sctk = { package = "smithay-client-toolkit", version = "0.18.1", optional = t
 tempfile = { version = "3.10.1", features = ["nightly"] }
 bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
 bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
+cfg-if = "1.0.0"
 
 
 [features]

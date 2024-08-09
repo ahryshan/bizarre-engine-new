@@ -12,7 +12,7 @@ use crate::{
     WindowHandle,
 };
 
-use super::x11_event_queue::X11EventQueue;
+use super::{x11_event::X11WindowEvent, x11_event_queue::X11EventQueue};
 
 pub struct X11Context {
     pub conn: xcb::Connection,
@@ -50,11 +50,8 @@ pub fn get_x11_context_mut() -> &'static mut X11Context {
 impl X11Context {
     pub fn drain_system_events(&mut self, event_queue: &mut EventQueue) -> WindowResult<()> {
         while let Some(xcb_event) = self.conn.poll_for_event().map_err(WindowError::from)? {
-            match WindowEvent::try_from(xcb_event) {
-                Ok(ev) => event_queue.push_event(ev),
-                Err(X11WindowEventConvertError::NotAWindowEvent(ev)) => {
-                    println!("Unhandled X11 event: {ev:?}")
-                }
+            if let Ok(ev) = X11WindowEvent::try_from(xcb_event) {
+                event_queue.push_event(ev)
             }
         }
 
@@ -70,7 +67,7 @@ pub enum X11WindowEventConvertError {
     NotAWindowEvent(xcb::Event),
 }
 
-impl TryFrom<xcb::Event> for WindowEvent {
+impl TryFrom<xcb::Event> for X11WindowEvent {
     type Error = X11WindowEventConvertError;
 
     fn try_from(xcb_event: xcb::Event) -> Result<Self, Self::Error> {
@@ -84,7 +81,7 @@ impl TryFrom<xcb::Event> for WindowEvent {
                     let height = ev.height();
                     let size = UVec2::new(width as u32, height as u32);
                     let position = IVec2::new(x as i32, y as i32);
-                    Ok(Self::X11ConfigureNotify {
+                    Ok(Self::ConfigureNotify {
                         handle,
                         size,
                         position,
@@ -92,11 +89,11 @@ impl TryFrom<xcb::Event> for WindowEvent {
                 }
                 x::Event::DestroyNotify(ev) => {
                     let handle = WindowHandle::from_raw(ev.window().resource_id());
-                    Ok(Self::WindowClosed(handle))
+                    Ok(Self::DestroyNotify { handle })
                 }
                 x::Event::ClientMessage(ev) => {
                     let handle = WindowHandle::from_raw(ev.window().resource_id());
-                    Ok(Self::X11ClientMessage {
+                    Ok(Self::ClientMessage {
                         handle,
                         data: ev.data(),
                     })
