@@ -1,0 +1,11 @@
+[package]
+name = "bizarre_input"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bizarre_event = { version = "0.1.0", path = "../bizarre_event" }
+bizarre_input_proc_macros = { version = "0.1.0", path = "macros" }
+bizarre_window = { version = "0.1.0", path = "../bizarre_window" }
+bizarre_ecs = {version = "0.1.0", path = "../bizarre_ecs"}
+bitflags = { workspace = true } 

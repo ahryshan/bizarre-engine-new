@@ -5,26 +5,36 @@ use crate::window::WindowHandle;
 
 #[derive(Clone, Debug)]
 pub enum WindowEvent {
-    WindowClosed(WindowHandle),
-    WindowResized {
+    Close(WindowHandle),
+    Resize {
         handle: WindowHandle,
         size: UVec2,
     },
-    WindowMoved {
+    Moved {
         handle: WindowHandle,
         position: IVec2,
     },
-    MainWindowCloseRequested(WindowHandle),
+    MainWindowCloseRequest(WindowHandle),
+    KeyPress {
+        handle: WindowHandle,
+        keycode: usize,
+    },
+    KeyRelease {
+        handle: WindowHandle,
+        keycode: usize,
+    },
 }
 
 impl WindowEvent {
     pub fn window_handle(&self) -> WindowHandle {
         use WindowEvent::*;
         match self {
-            WindowClosed(handle)
-            | WindowResized { handle, .. }
-            | WindowMoved { handle, .. }
-            | MainWindowCloseRequested(handle) => *handle,
+            Close(handle)
+            | Resize { handle, .. }
+            | Moved { handle, .. }
+            | KeyPress { handle, .. }
+            | KeyRelease { handle, .. }
+            | MainWindowCloseRequest(handle) => *handle,
         }
     }
 }

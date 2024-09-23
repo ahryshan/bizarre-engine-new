@@ -1,4 +1,4 @@
-use std::{fmt::Display, marker::PhantomData};
+use std::fmt::Display;
 
 use bitflags::bitflags;
 use system_param::SystemParam;

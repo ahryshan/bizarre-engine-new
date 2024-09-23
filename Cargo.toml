@@ -10,6 +10,7 @@ members = [
     "crates/bizarre_ecs",
     "crates/bizarre_memory",
     "crates/bizarre_utils",
+    "crates/bizarre_input",
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 
@@ -17,3 +18,4 @@ default-members = ["sandbox", "crates/bizarre_engine"]
 nalgebra-glm = "0.18.0"
 anyhow = "1.0.82"
 thiserror = "1.0.61"
+bitflags = "2.6.0"

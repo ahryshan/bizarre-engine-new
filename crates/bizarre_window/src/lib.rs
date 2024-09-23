@@ -1,3 +1,5 @@
+#![feature(generic_arg_infer)]
+
 #[cfg(all(target_os = "linux"))]
 mod linux;
 

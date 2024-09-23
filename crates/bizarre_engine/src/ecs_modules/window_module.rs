@@ -40,7 +40,7 @@ impl EcsModule for WindowModule {
         }
 
         world.insert_resource(window_manager);
-        world.add_systems(Schedule::Preupdate, (process_window_events));
+        world.add_systems(Schedule::Preupdate, process_window_events);
     }
 }
 

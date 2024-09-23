@@ -9,9 +9,7 @@ use crate::{
     prelude::Resource,
     resource::resource_commands::{InsertResourceCmd, RemoveResourceCmd},
     system::{
-        schedule::{self, Schedule},
-        system_commands::AddSystemsCmd,
-        system_config::IntoSystemConfigs,
+        schedule::Schedule, system_commands::AddSystemsCmd, system_config::IntoSystemConfigs,
         system_param::SystemParam,
     },
     world::{unsafe_world_cell::UnsafeWorldCell, World},

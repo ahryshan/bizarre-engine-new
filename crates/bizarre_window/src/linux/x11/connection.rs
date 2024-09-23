@@ -4,7 +4,10 @@ use anyhow::Result;
 use bizarre_event::EventQueue;
 use nalgebra_glm::{IVec2, UVec2};
 use thiserror::Error;
-use xcb::{x, xkb, Xid};
+use xcb::{
+    x::{self, ChangeKeyboardControl},
+    xkb, Xid,
+};
 
 use crate::{
     window_error::{WindowError, WindowResult},
@@ -24,7 +27,7 @@ static CONTEXT_INIT: Once = Once::new();
 
 fn init_x11_context() {
     unsafe {
-        CONTEXT = xcb::Connection::connect(None)
+        CONTEXT = xcb::Connection::connect_with_extensions(None, &[xcb::Extension::Xkb], &[])
             .map_err(|err| panic!("Cannot connect to X11 display: {:?}", err))
             .map(|(connection, screen_num)| X11Context {
                 conn: connection,
@@ -32,6 +35,27 @@ fn init_x11_context() {
             })
             .unwrap()
             .into();
+
+        let X11Context { conn, .. } = CONTEXT.as_mut().unwrap();
+
+        // let repeat_cookie = conn.send_request(&xkb::PerClientFlags {
+        //     device_spec: xkb::Id::UseCoreKbd as u16,
+        //     change: xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT,
+        //     value: xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT,
+        //     ctrls_to_change: xkb::BoolCtrl::REPEAT_KEYS,
+        //     auto_ctrls: xkb::BoolCtrl::REPEAT_KEYS,
+        //     auto_ctrls_values: xkb::BoolCtrl::REPEAT_KEYS,
+        // });
+
+        // let reply = conn.wait_for_reply(repeat_cookie);
+
+        let cookie = conn.send_request_checked(&ChangeKeyboardControl {
+            value_list: &[x::Kb::AutoRepeatMode(x::AutoRepeatMode::Off)],
+        });
+
+        conn.check_request(cookie)
+            .map_err(|err| panic!("{err:?}"))
+            .unwrap();
     }
 }
 
@@ -52,7 +76,7 @@ impl X11Context {
         while let Some(xcb_event) = self.conn.poll_for_event().map_err(WindowError::from)? {
             match X11WindowEvent::try_from(xcb_event) {
                 Ok(ev) => event_queue.push_event(ev),
-                Err(X11WindowEventConvertError::NotAWindowEvent(ev)) => {
+                Err(X11WindowEventConvertError::UnsupportedX11Event(ev)) => {
                     println!("Unhandled X11 event: {ev:?}")
                 }
             }
@@ -65,9 +89,9 @@ impl X11Context {
 #[derive(Error, Debug)]
 pub enum X11WindowEventConvertError {
     #[error(
-        "The provided event cannot be converted to WindowEvent: it's not a window event ({0:?})"
+        "The provided event cannot be converted to WindowEvent: it's not a supported X11 event ({0:?})"
     )]
-    NotAWindowEvent(xcb::Event),
+    UnsupportedX11Event(xcb::Event),
 }
 
 impl TryFrom<xcb::Event> for X11WindowEvent {
@@ -136,9 +160,9 @@ impl TryFrom<xcb::Event> for X11WindowEvent {
                     let pos = IVec2::new(ev.event_x() as i32, ev.event_y() as i32);
                     Ok(Self::MouseMove { handle, pos })
                 }
-                _ => Err(Self::Error::NotAWindowEvent(xcb_event)),
+                _ => Err(Self::Error::UnsupportedX11Event(xcb_event)),
             },
-            _ => Err(Self::Error::NotAWindowEvent(xcb_event)),
+            _ => Err(Self::Error::UnsupportedX11Event(xcb_event)),
         }
     }
 }

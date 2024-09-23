@@ -1,15 +1,10 @@
 use std::ops::{Deref, DerefMut};
 
-use anyhow::Result;
 use bizarre_core::Handle;
-use bizarre_event::{EventQueue, EventReader};
+use bizarre_event::EventReader;
 use cfg_if::cfg_if;
-use nalgebra_glm::{IVec2, UVec2};
 
-use crate::{
-    platform_window::PlatformWindow, window_error::WindowResult, window_events::WindowEvent,
-    WindowCreateInfo,
-};
+use crate::{platform_window::PlatformWindow, window_error::WindowResult, WindowCreateInfo};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(u8)]
@@ -52,6 +47,10 @@ impl Window {
             inner,
             event_reader: None,
         })
+    }
+
+    pub fn handle(&self) -> WindowHandle {
+        self.handle
     }
 }
 

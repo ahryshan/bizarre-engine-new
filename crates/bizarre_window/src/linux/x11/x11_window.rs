@@ -632,7 +632,7 @@ impl X11Window {
                 size,
             } => {
                 if position != &self.position {
-                    let event = WindowEvent::WindowMoved {
+                    let event = WindowEvent::Moved {
                         handle: *handle,
                         position: *position,
                     };
@@ -641,7 +641,7 @@ impl X11Window {
                 }
 
                 if size != &self.size {
-                    let event = WindowEvent::WindowResized {
+                    let event = WindowEvent::Resize {
                         handle: *handle,
                         size: *size,
                     };
@@ -649,20 +649,35 @@ impl X11Window {
                     output.push(event);
                 }
             }
+
             X11WindowEvent::ClientMessage {
                 handle,
                 data: x::ClientMessageData::Data32([atom, ..]),
             } => {
                 if atom == &self.atoms.delete_window.resource_id() {
                     self.close_requested = true;
-                    let event = WindowEvent::WindowClosed(*handle);
+                    let event = WindowEvent::Close(*handle);
                     output.push(event);
                 }
             }
 
+            X11WindowEvent::KeyPress { handle, keycode } => {
+                output.push(WindowEvent::KeyPress {
+                    handle: *handle,
+                    keycode: *keycode as usize,
+                });
+            }
+
+            X11WindowEvent::KeyRelease { handle, keycode } => {
+                output.push(WindowEvent::KeyRelease {
+                    handle: *handle,
+                    keycode: *keycode as usize,
+                });
+            }
+
             X11WindowEvent::DestroyNotify { handle, .. } => {
                 self.close_requested = true;
-                output.push(WindowEvent::WindowClosed(*handle));
+                output.push(WindowEvent::Close(*handle));
             }
             _ => {}
         }
