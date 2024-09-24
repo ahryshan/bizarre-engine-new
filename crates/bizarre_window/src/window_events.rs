@@ -1,5 +1,4 @@
 use nalgebra_glm::{IVec2, UVec2};
-use xcb::x;
 
 use crate::window::WindowHandle;
 

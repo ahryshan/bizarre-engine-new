@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[cfg(feature = "wayland")]
-use super::wayland::wayland_window::WaylandWindow;
+use super::wayland::wl_window::WlWindow;
 
 #[cfg(feature = "x11")]
 use super::x11::x11_window::X11Window;
@@ -68,9 +68,10 @@ impl PlatformWindow for LinuxWindow {
     {
         let display = DISPLAY.clone();
         let inner: Box<dyn PlatformWindow> = match display {
+            #[cfg(feature = "x11")]
             __LinuxDisplay::X11 => Box::new(X11Window::new(create_info)?),
             #[cfg(feature = "wayland")]
-            __LinuxDisplay::Wayland => Box::new(WaylandWindow::new(create_info)?),
+            __LinuxDisplay::Wayland => Box::new(WlWindow::new(create_info)?),
             _ => panic!(
                 "Cannot create window, because support for display server not present: {display:?}"
             ),
