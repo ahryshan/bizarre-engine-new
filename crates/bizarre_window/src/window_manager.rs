@@ -87,7 +87,17 @@ impl WindowManager {
     }
 
     fn drain_window_events_wl(&self, events: &mut EventQueue) -> WindowResult<()> {
-        todo!("Wayland is not yet supported")
+        cfg_if! {
+            if #[cfg(feature = "wayland")] {
+                use crate::linux::wayland::wl_context::WL_CONTEXT;
+
+                let mut context = WL_CONTEXT.write().unwrap();
+
+                context.drain_system_events(events)
+            } else {
+                panic!("Trying to pump events from Wayland server while there is no Wayland support included into compilation");
+            }
+        }
     }
 }
 

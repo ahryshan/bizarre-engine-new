@@ -101,7 +101,7 @@ impl TryFrom<xcb::Event> for X11WindowEvent {
         match xcb_event {
             xcb::Event::X(ref ev) => match ev {
                 x::Event::ConfigureNotify(ev) => {
-                    let handle = WindowHandle::from_raw(ev.window().resource_id());
+                    let handle = WindowHandle::from_raw(ev.window().resouce_id());
                     let x = ev.x();
                     let y = ev.y();
                     let width = ev.width();

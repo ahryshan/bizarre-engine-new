@@ -13,6 +13,10 @@ pub enum WindowError {
         protocol: &'static str,
         reason: &'static str,
     },
+    #[error("Windowing context is unreachable: {reason}")]
+    ContextUnreachable { reason: String },
+    #[error("Windowing context wasn't initialized properly: {reason}")]
+    ContextUninitialized { reason: String },
     #[error("Error unknown")]
     Unknown,
 }

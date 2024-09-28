@@ -1,18 +1,53 @@
-use nalgebra_glm::{IVec2, UVec2};
+use nalgebra_glm::{IVec2, U8Vec2, UVec2};
+use wayland_client::{
+    delegate_noop,
+    protocol::{wl_buffer::WlBuffer, wl_shm::WlShm, wl_shm_pool::WlShmPool, wl_surface::WlSurface},
+    Dispatch,
+};
+use wayland_protocols::xdg::{
+    decoration::zv1::client::zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1,
+    shell::client::{xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel},
+};
 
-use crate::{window_error::WindowResult, PlatformWindow};
+use crate::{
+    window_error::{WindowError, WindowResult},
+    PlatformWindow, WindowHandle,
+};
 
-use super::wl_context::WL_CONTEXT;
+use super::wl_context::{WlWindowResources, WL_CONTEXT};
 
-pub struct WlWindow {}
+pub struct WlWindow {
+    event_queue: wayland_client::EventQueue<WlWindowState>,
+    state: WlWindowState,
+}
+
+pub(crate) struct WlWindowState {
+    pub(crate) surface: WlSurface,
+    pub(crate) xdg_surface: XdgSurface,
+    pub(crate) xdg_toplevel: XdgToplevel,
+    pub(crate) decorations: ZxdgToplevelDecorationV1,
+    pub(crate) resources: WlWindowResources,
+}
 
 impl PlatformWindow for WlWindow {
     fn new(create_info: &crate::WindowCreateInfo) -> WindowResult<Self>
     where
         Self: Sized,
     {
-        WL_CONTEXT.read().unwrap();
-        todo!();
+        let wayland_context = WL_CONTEXT
+            .read()
+            .map_err(|err| WindowError::ContextUnreachable {
+                reason: format!("Could not aquire read lock on Wayland context: {err}"),
+            })?;
+
+        let [width, height] = create_info.size.into();
+        let (width, height) = (width as usize, height as usize);
+
+        let (event_queue, state) = wayland_context.create_window_state(width, height);
+
+        let window = WlWindow { state, event_queue };
+
+        Ok(window)
     }
 
     fn size(&self) -> UVec2 {
@@ -35,8 +70,8 @@ impl PlatformWindow for WlWindow {
         todo!()
     }
 
-    fn handle(&self) -> crate::WindowHandle {
-        todo!()
+    fn handle(&self) -> WindowHandle {
+        WindowHandle::from_raw(1u32)
     }
 
     fn title(&self) -> &str {
@@ -68,7 +103,7 @@ impl PlatformWindow for WlWindow {
     }
 
     fn map(&mut self) -> WindowResult<()> {
-        todo!()
+        Ok(())
     }
 
     fn unmap(&mut self) -> WindowResult<()> {
@@ -92,10 +127,53 @@ impl PlatformWindow for WlWindow {
     }
 
     fn handle_events(&mut self, event_queue: &mut bizarre_event::EventQueue) -> WindowResult<()> {
-        todo!()
+        let prepare_read = self.event_queue.prepare_read();
+
+        match prepare_read {
+            Some(guard) => match guard.read() {
+                Ok(count) => println!("window: dispatched: {count} events"),
+                _ => {}
+            },
+            None => {
+                println!("window: before dispatch_pending");
+                self.event_queue.dispatch_pending(&mut self.state).unwrap();
+                println!("window: after dispatch_pending");
+            }
+            _ => (),
+        }
+
+        self.event_queue.flush();
+
+        Ok(())
     }
 
     fn close_requested(&self) -> bool {
-        todo!()
+        false
     }
 }
+
+impl Dispatch<XdgSurface, (), WlWindowState> for WlWindowState {
+    fn event(
+        state: &mut WlWindowState,
+        proxy: &XdgSurface,
+        event: <XdgSurface as wayland_client::Proxy>::Event,
+        data: &(),
+        conn: &wayland_client::Connection,
+        qhandle: &wayland_client::QueueHandle<WlWindowState>,
+    ) {
+        match event {
+            wayland_protocols::xdg::shell::client::xdg_surface::Event::Configure { serial } => {
+                println!("XdgSurface: acknowledging configure: {serial}");
+                state.xdg_surface.ack_configure(serial)
+            }
+            _ => (),
+        }
+    }
+}
+
+delegate_noop!(WlWindowState: ignore WlShm);
+delegate_noop!(WlWindowState: ignore WlBuffer);
+delegate_noop!(WlWindowState: ignore WlShmPool);
+delegate_noop!(WlWindowState: ignore WlSurface);
+delegate_noop!(WlWindowState: ignore XdgToplevel);
+delegate_noop!(WlWindowState: ignore ZxdgToplevelDecorationV1);
