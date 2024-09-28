@@ -1,5 +1,8 @@
+use std::io::ErrorKind;
+
 use nalgebra_glm::{IVec2, U8Vec2, UVec2};
 use wayland_client::{
+    backend::WaylandError,
     delegate_noop,
     protocol::{wl_buffer::WlBuffer, wl_shm::WlShm, wl_shm_pool::WlShmPool, wl_surface::WlSurface},
     Dispatch,
@@ -127,22 +130,28 @@ impl PlatformWindow for WlWindow {
     }
 
     fn handle_events(&mut self, event_queue: &mut bizarre_event::EventQueue) -> WindowResult<()> {
-        let prepare_read = self.event_queue.prepare_read();
+        self.event_queue.flush().unwrap();
 
-        match prepare_read {
-            Some(guard) => match guard.read() {
-                Ok(count) => println!("window: dispatched: {count} events"),
-                _ => {}
-            },
+        self.event_queue.dispatch_pending(&mut self.state).unwrap();
+
+        match self.event_queue.prepare_read() {
             None => {
-                println!("window: before dispatch_pending");
                 self.event_queue.dispatch_pending(&mut self.state).unwrap();
-                println!("window: after dispatch_pending");
             }
-            _ => (),
+            Some(guard) => match guard.read() {
+                Ok(count) if count > 0 => println!("window: dispatched: {count} events"),
+                Ok(_) => {}
+                Err(WaylandError::Io(err)) => {
+                    if let ErrorKind::WouldBlock = err.kind() {
+                    } else {
+                        panic!("{err:?}")
+                    }
+                }
+                Err(err) => {
+                    panic!("{err:?}")
+                }
+            },
         }
-
-        self.event_queue.flush();
 
         Ok(())
     }

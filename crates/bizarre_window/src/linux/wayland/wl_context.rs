@@ -1,6 +1,7 @@
 use core::sync::{self, atomic};
 use std::{
     borrow::Borrow,
+    io::ErrorKind,
     os::fd::{AsFd, OwnedFd},
     ptr::{self, slice_from_raw_parts_mut},
     slice,
@@ -14,6 +15,7 @@ use rustix::{
     shm::OFlags,
 };
 use wayland_client::{
+    backend::WaylandError,
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
@@ -40,7 +42,7 @@ use wayland_protocols::xdg::{
     },
 };
 
-use crate::window_error::WindowResult;
+use crate::window_error::{WindowError, WindowResult};
 
 use super::wl_window::WlWindowState;
 
@@ -198,9 +200,28 @@ impl WaylandContext {
     }
 
     pub fn drain_system_events(&mut self, eq: &mut bizarre_event::EventQueue) -> WindowResult<()> {
-        self.event_queue.flush();
+        self.event_queue.flush().unwrap();
 
         self.event_queue.dispatch_pending(&mut self.state).unwrap();
+
+        match self.event_queue.prepare_read() {
+            None => {
+                self.event_queue.dispatch_pending(&mut self.state).unwrap();
+            }
+            Some(guard) => match guard.read() {
+                Ok(count) if count > 0 => println!("dispatched: {count} events"),
+                Ok(_) => {}
+                Err(WaylandError::Io(err)) => {
+                    if let ErrorKind::WouldBlock = err.kind() {
+                    } else {
+                        panic!("{err:?}")
+                    }
+                }
+                Err(err) => {
+                    panic!("{err:?}")
+                }
+            },
+        }
 
         Ok(())
     }
@@ -241,15 +262,6 @@ impl Dispatch<WlRegistry, GlobalListContents> for WaylandState {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        match _event {
-            wl_registry::Event::Global {
-                name,
-                interface,
-                version,
-            } => println!("[{name}] {interface} (v.{version})"),
-            wl_registry::Event::GlobalRemove { name } => {}
-            _ => {}
-        }
     }
 }
 

@@ -9,10 +9,7 @@ pub enum WindowError {
     #[error("The underlying display server disconnected")]
     LostConnection,
     #[error("There was a problem with protocol `{protocol}`: {reason}")]
-    ProtocolError {
-        protocol: &'static str,
-        reason: &'static str,
-    },
+    ProtocolError { protocol: String, reason: String },
     #[error("Windowing context is unreachable: {reason}")]
     ContextUnreachable { reason: String },
     #[error("Windowing context wasn't initialized properly: {reason}")]
