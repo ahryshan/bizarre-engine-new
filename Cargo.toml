@@ -20,3 +20,5 @@ anyhow = "1.0.82"
 thiserror = "1.0.61"
 bitflags = "2.6.0"
 lazy_static = "1.5.0"
+rustix = { version = "0.38.37", features = ["std", "use-libc-auxv", "mm"] }
+

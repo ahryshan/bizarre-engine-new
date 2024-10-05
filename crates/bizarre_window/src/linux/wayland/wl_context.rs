@@ -1,18 +1,16 @@
-use core::sync::{self, atomic};
+use core::sync::atomic;
 use std::{
-    borrow::Borrow,
+    hash::{DefaultHasher, Hash, Hasher},
     io::ErrorKind,
     os::fd::{AsFd, OwnedFd},
-    ptr::{self, slice_from_raw_parts_mut},
+    ptr::{self},
     slice,
     sync::{atomic::AtomicUsize, LazyLock, RwLock},
 };
 
-use lazy_static::lazy_static;
 use rustix::{
     fs::ftruncate,
     mm::{munmap, MapFlags, ProtFlags},
-    shm::OFlags,
 };
 use wayland_client::{
     backend::WaylandError,
@@ -20,31 +18,28 @@ use wayland_client::{
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
         wl_buffer::WlBuffer,
-        wl_compositor::{self, WlCompositor},
-        wl_display::WlDisplay,
-        wl_registry::{self, WlRegistry},
+        wl_compositor::WlCompositor,
+        wl_registry::WlRegistry,
+        wl_seat::WlSeat,
         wl_shm::{self, WlShm},
         wl_shm_pool::WlShmPool,
-        wl_surface::WlSurface,
     },
     Connection, Dispatch, Proxy, QueueHandle,
 };
 use wayland_protocols::xdg::{
-    activation::v1::client::xdg_activation_token_v1::XdgActivationTokenV1,
     decoration::zv1::client::{
-        zxdg_decoration_manager_v1::{self, ZxdgDecorationManagerV1},
-        zxdg_toplevel_decoration_v1::{self, ZxdgToplevelDecorationV1},
+        zxdg_decoration_manager_v1::ZxdgDecorationManagerV1,
+        zxdg_toplevel_decoration_v1::{self},
     },
-    shell::client::{
-        xdg_surface::XdgSurface,
-        xdg_toplevel::XdgToplevel,
-        xdg_wm_base::{self, XdgWmBase},
-    },
+    shell::client::xdg_wm_base::{self, XdgWmBase},
 };
 
-use crate::window_error::{WindowError, WindowResult};
+use crate::{window_error::WindowResult, WindowHandle};
 
-use super::wl_window::WlWindowState;
+use super::{
+    shared_memory::SharedMemory,
+    wl_window::{WlWindowResources, WlWindowState},
+};
 
 pub(crate) static WL_CONTEXT: LazyLock<RwLock<WaylandContext>> =
     LazyLock::new(|| RwLock::new(WaylandContext::new()));
@@ -60,12 +55,7 @@ pub struct WaylandState {
     pub(crate) shm: WlShm,
     pub(crate) xdg: XdgWmBase,
     pub(crate) xdg_decoration_manager: ZxdgDecorationManagerV1,
-}
-
-pub struct WlWindowResources {
-    pub(crate) shm_fd: OwnedFd,
-    pub(crate) pool: WlShmPool,
-    pub(crate) buffer: WlBuffer,
+    pub(crate) seat: WlSeat,
 }
 
 impl WaylandContext {
@@ -95,6 +85,9 @@ impl WaylandContext {
             xdg_decoration_manager: globals
                 .bind(&qh, 0..=ZxdgDecorationManagerV1::interface().version, ())
                 .unwrap_or_else(|err| panic!("Could not obtain xdg_wm_base: {err}")),
+            seat: globals
+                .bind(&qh, 0..=WlSeat::interface().version, ())
+                .unwrap_or_else(|err| panic!("Could not obtain wl_seat: {err}")),
         };
 
         conn.roundtrip();
@@ -106,15 +99,15 @@ impl WaylandContext {
         }
     }
 
-    pub fn create_window_state(
+    pub fn create_window_resources(
         &self,
         width: usize,
         height: usize,
-    ) -> (wayland_client::EventQueue<WlWindowState>, WlWindowState) {
+    ) -> (wayland_client::EventQueue<WlWindowState>, WlWindowResources) {
         let stride = width * 4;
         let pool_size = height * 2 * stride;
 
-        let shm_fd = Self::open_shm(pool_size);
+        let shm = Self::open_shm(pool_size);
 
         let (ptr, pool_data) = unsafe {
             let ptr = rustix::mm::mmap(
@@ -122,7 +115,7 @@ impl WaylandContext {
                 pool_size,
                 ProtFlags::READ | ProtFlags::WRITE,
                 MapFlags::SHARED,
-                shm_fd.as_fd(),
+                shm.as_fd(),
                 0,
             )
             .unwrap()
@@ -137,7 +130,7 @@ impl WaylandContext {
         let pool = self
             .state
             .shm
-            .create_pool(shm_fd.as_fd(), pool_size as i32, &qh, ());
+            .create_pool(shm.as_fd(), pool_size as i32, &qh, ());
 
         let buffer = pool.create_buffer(
             0,
@@ -180,23 +173,22 @@ impl WaylandContext {
         surface.damage(0, 0, i32::MAX, i32::MAX);
         surface.commit();
 
+        let keyboard = self.state.seat.get_keyboard(&qh, ());
+
         event_queue.flush();
 
         let resources = WlWindowResources {
             buffer,
             pool,
-            shm_fd,
-        };
-
-        let state = WlWindowState {
+            shm,
+            keyboard,
             surface,
             xdg_surface,
             xdg_toplevel,
             decorations,
-            resources,
         };
 
-        (event_queue, state)
+        (event_queue, resources)
     }
 
     pub fn drain_system_events(&mut self, eq: &mut bizarre_event::EventQueue) -> WindowResult<()> {
@@ -209,7 +201,6 @@ impl WaylandContext {
                 self.event_queue.dispatch_pending(&mut self.state).unwrap();
             }
             Some(guard) => match guard.read() {
-                Ok(count) if count > 0 => println!("dispatched: {count} events"),
                 Ok(_) => {}
                 Err(WaylandError::Io(err)) => {
                     if let ErrorKind::WouldBlock = err.kind() {
@@ -226,30 +217,29 @@ impl WaylandContext {
         Ok(())
     }
 
-    fn open_shm(size: usize) -> OwnedFd {
-        use rustix::shm::Mode;
+    fn open_shm(size: usize) -> SharedMemory {
+        use rustix::shm::{Mode, OFlags};
 
         static NEXT_FILE_NUMBER: AtomicUsize = AtomicUsize::new(1);
 
-        let fd = loop {
+        let shared_mem = loop {
             let file_number = NEXT_FILE_NUMBER.fetch_add(1, atomic::Ordering::AcqRel);
 
             let filename = format!("/wl_shm-{file_number:0>4}");
 
-            let result = rustix::shm::open(
+            let result = SharedMemory::new(
                 filename,
+                size,
                 OFlags::RDWR | OFlags::CREATE | OFlags::EXCL,
                 Mode::from_bits_retain(600),
             );
 
-            if let Ok(fd) = result {
-                break fd;
+            if let Ok(shared_mem) = result {
+                break shared_mem;
             }
         };
 
-        ftruncate(fd.as_fd(), size as u64).unwrap();
-
-        fd
+        shared_mem
     }
 }
 
@@ -288,3 +278,4 @@ impl Dispatch<XdgWmBase, ()> for WaylandState {
 delegate_noop!(WaylandState: ignore WlCompositor);
 delegate_noop!(WaylandState: ignore ZxdgDecorationManagerV1);
 delegate_noop!(WaylandState: ignore WlShm);
+delegate_noop!(WaylandState: ignore WlSeat);
