@@ -7,6 +7,7 @@ use std::{
     sync::{atomic::AtomicUsize, LazyLock, RwLock},
 };
 
+use bizarre_log::core_info;
 use rustix::mm::{munmap, MapFlags, ProtFlags};
 use wayland_client::{
     backend::WaylandError,
@@ -55,7 +56,7 @@ impl WaylandContext {
     fn new() -> Self {
         let conn = match Connection::connect_to_env() {
             Ok(conn) => {
-                println!("Successfully connected to Wayland server!");
+                core_info!("Successfully connected to Wayland server!");
                 conn
             }
             Err(err) => panic!("Could not create a Wayland connection: {err}"),
@@ -255,7 +256,6 @@ impl Dispatch<XdgWmBase, ()> for WaylandState {
         conn: &Connection,
         qhandle: &QueueHandle<Self>,
     ) {
-        println!("xdg_wm_base dispatch");
         match event {
             xdg_wm_base::Event::Ping { serial } => {
                 state.xdg.pong(serial);

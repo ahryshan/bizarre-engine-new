@@ -8,7 +8,7 @@ macro_rules! escape_sequence {
 #[macro_export]
 macro_rules! log {
     ($name: expr, $log_level: expr, $($args:tt)*) => {
-        $crate::log_thread::send_log($crate::Log {
+        $crate::send_log($crate::Log {
             target: $name,
             level: $log_level,
             message: format!($($args)*),

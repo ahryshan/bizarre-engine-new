@@ -85,7 +85,6 @@ impl InputManager {
                             modifiers: self.keyboard_modifiers,
                             source: InputEventSource::Window(*handle),
                         };
-                        println!("KeyPressed: {key:?}");
                         Some(input_event)
                     }
                     WindowEvent::KeyRelease { handle, keycode } => {
@@ -93,8 +92,6 @@ impl InputManager {
 
                         self.keyboard_modifiers &= !KeyboardModifier::from(key);
                         self.keys[key.as_usize()] = false;
-
-                        println!("KeyRelease: {key:?}");
 
                         Some(InputEvent::KeyRelease {
                             key,

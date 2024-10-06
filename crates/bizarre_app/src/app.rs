@@ -9,6 +9,7 @@ use bizarre_ecs::{
     world::World,
 };
 use bizarre_event::{EventQueue, EventReader};
+use bizarre_log::{core_info, info, shutdown_logging};
 
 use crate::app_event::AppEvent;
 
@@ -25,6 +26,8 @@ pub struct App {
 
 impl App {
     pub fn run(&mut self) -> Result<()> {
+        core_info!("Starting the `{}` App", self.name);
+
         self.running = true;
 
         const FRAME_TARGET_TIME: Duration = Duration::from_millis(1000 / 60);
@@ -47,6 +50,8 @@ impl App {
             }
         }
 
+        shutdown_logging();
+
         Ok(())
     }
 
@@ -55,7 +60,7 @@ impl App {
 
         while let Some(ev) = event_queue.poll_event::<AppEvent>(&self.event_reader) {
             if let AppEvent::CloseRequested = ev {
-                println!("Got AppEvent::CloseRequested!");
+                core_info!("Got AppEvent::CloseRequested!");
                 self.running = false;
                 event_queue.push_event(AppEvent::WillClose);
             }

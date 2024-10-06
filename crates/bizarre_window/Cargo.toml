@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bizarre_event = { version = "0.1.0", path = "../bizarre_event" }
+bizarre_log = { version = "0.1.0", path = "../bizarre_log" }
 
 nalgebra-glm = { workspace = true }
 anyhow = { workspace = true }

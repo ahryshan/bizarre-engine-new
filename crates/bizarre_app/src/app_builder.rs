@@ -6,6 +6,7 @@ use bizarre_ecs::{
     world::{ecs_module::EcsModule, World},
 };
 use bizarre_event::EventQueue;
+use bizarre_log::init_logging;
 
 use crate::{
     app_event::AppEvent, default_app_module::DefaultAppEcsModule,
@@ -52,6 +53,8 @@ impl AppBuilder<WithName> {
         let AppBuilder {
             name, mut modules, ..
         } = self;
+
+        init_logging(None, None);
 
         let name = name.expect("Cannot build an app without a name");
 
@@ -112,10 +115,12 @@ pub fn change_event_queue_frames(mut eq: ResMut<EventQueue>) {
 pub fn setup_termination_handler() -> std::sync::mpsc::Receiver<i32> {
     use std::sync::mpsc;
 
+    use bizarre_log::core_info;
+
     let (tx, rx) = mpsc::channel();
 
     ctrlc::set_handler(move || {
-        println!("GOT SIGTERM");
+        core_info!("GOT SIGTERM");
         tx.send(0)
             .unwrap_or_else(|_| panic!("Could not send termination signal"));
     });

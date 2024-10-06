@@ -81,7 +81,6 @@ impl PlatformWindow for WlWindow {
             resources.surface.hash(&mut hasher);
             let hash = hasher.finish();
             let handle = WindowHandle::from_raw(hash);
-            println!("Created window handle: {handle:?}, {:?}", resources.surface);
             handle
         };
 
@@ -148,8 +147,6 @@ impl PlatformWindow for WlWindow {
 
     fn set_size(&mut self, size: UVec2) -> WindowResult<()> {
         let [width, height] = [size.x as i32, size.y as i32];
-
-        println!("setting window size: {:?}", [width, height]);
 
         self.state
             .resources
@@ -271,7 +268,6 @@ impl Dispatch<XdgSurface, (), WlWindowState> for WlWindowState {
         conn: &wayland_client::Connection,
         qhandle: &wayland_client::QueueHandle<WlWindowState>,
     ) {
-        println!("xdg_surface: {event:#?}");
         match event {
             xdg_surface::Event::Configure { serial } => {
                 proxy.ack_configure(serial);
@@ -291,7 +287,6 @@ impl Dispatch<XdgToplevel, ()> for WlWindowState {
         conn: &Connection,
         qhandle: &QueueHandle<Self>,
     ) {
-        println!("xdg_toplevel: {event:#?}");
         match event {
             xdg_toplevel::Event::Close => {
                 state
@@ -321,10 +316,7 @@ impl Dispatch<ZxdgToplevelDecorationV1, ()> for WlWindowState {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            zxdg_toplevel_decoration_v1::Event::Configure { mode } => {
-                println!("xdg_toplevel_decoration: set mode `{mode:?}`")
-            }
-            _ => todo!(),
+            _ => (),
         }
     }
 }

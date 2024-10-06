@@ -37,8 +37,6 @@ impl EcsModule for WindowModule {
             }
         }
 
-        println!("{:#?}", window_manager.iter().collect::<Vec<_>>());
-
         world.insert_resource(window_manager);
         world.add_systems(Schedule::Preupdate, process_window_events);
     }

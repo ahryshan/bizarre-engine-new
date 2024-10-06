@@ -4,6 +4,7 @@
 use std::fmt::Display;
 
 mod log_thread;
+pub use log_thread::{init_logging, register_logger, send_log, shutdown_logging};
 
 pub mod escape_code;
 pub mod log_target;
