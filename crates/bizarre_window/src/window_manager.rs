@@ -7,7 +7,7 @@ use cfg_if::cfg_if;
 use crate::{
     window::Window,
     window_error::{WindowError, WindowResult},
-    PlatformWindow, WindowCreateInfo, WindowHandle,
+    WindowCreateInfo, WindowHandle,
 };
 
 #[derive(Resource, Default)]
@@ -62,9 +62,6 @@ impl WindowManager {
 #[cfg(target_os = "linux")]
 use crate::linux::linux_window::{__LinuxDisplay, get_linux_display_type};
 
-#[cfg(all(target_os = "linux", feature = "x11"))]
-use crate::linux::x11::connection::*;
-
 #[cfg(target_os = "linux")]
 impl WindowManager {
     pub fn drain_window_events(&self, events: &mut EventQueue) -> WindowResult<()> {
@@ -75,15 +72,7 @@ impl WindowManager {
     }
 
     fn drain_window_events_x11(&self, events: &mut EventQueue) -> WindowResult<()> {
-        cfg_if! {
-            if #[cfg(feature = "x11")] {
-                let context = get_x11_context_mut();
-
-                context.drain_system_events(events)
-            } else {
-                panic!("Trying to pump events from X11 server while there is no X11 support included into compilation");
-            }
-        }
+        panic!("Trying to pump events from X11 server while there is no X11 support included into compilation");
     }
 
     fn drain_window_events_wl(&self, events: &mut EventQueue) -> WindowResult<()> {

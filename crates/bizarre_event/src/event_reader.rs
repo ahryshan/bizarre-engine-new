@@ -11,7 +11,7 @@ use bizarre_ecs::{
 
 use crate::{Event, EventQueue};
 
-#[derive(Hash, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
+#[derive(Hash, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Debug)]
 pub struct EventReader {
     pub(crate) id: usize,
 }

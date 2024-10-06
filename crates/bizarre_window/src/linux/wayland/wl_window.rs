@@ -31,23 +31,11 @@ use crate::{
     PlatformWindow, WindowHandle, WindowMode, WindowStatus,
 };
 
-use super::{shared_memory::SharedMemory, wl_context::WL_CONTEXT};
+use super::{shared_memory::SharedMemory, wl_context::WL_CONTEXT, wl_window_state::WlWindowState};
 
 pub struct WlWindow {
     wl_event_queue: wayland_client::EventQueue<WlWindowState>,
     state: WlWindowState,
-}
-
-pub(crate) struct WlWindowState {
-    pub(crate) handle: WindowHandle,
-    pub(crate) internal_event_queue: Vec<WindowEvent>,
-    pub(crate) size: UVec2,
-    pub(crate) position: UVec2,
-    pub(crate) decorations: bool,
-    pub(crate) title: String,
-    pub(crate) mode: WindowMode,
-    pub(crate) close_requested: bool,
-    pub(crate) resources: WlWindowResources,
 }
 
 pub struct WlWindowResources {
@@ -92,16 +80,22 @@ impl PlatformWindow for WlWindow {
             let mut hasher = DefaultHasher::new();
             resources.surface.hash(&mut hasher);
             let hash = hasher.finish();
-            WindowHandle::from_raw(hash)
+            let handle = WindowHandle::from_raw(hash);
+            println!("Created window handle: {handle:?}, {:?}", resources.surface);
+            handle
+        };
+
+        let size = {
+            let [x, y] = create_info.size.into();
+            [x as i32, y as i32].into()
         };
 
         let state = WlWindowState {
             handle,
             internal_event_queue: Default::default(),
-            size: UVec2::zeros(),
-            position: UVec2::zeros(),
-            decorations: create_info.decorations,
-            title: Default::default(),
+            size,
+            position: create_info.position.clone(),
+            title: create_info.title.clone(),
             close_requested: false,
             mode: create_info.mode,
             resources,
@@ -112,9 +106,14 @@ impl PlatformWindow for WlWindow {
             wl_event_queue: event_queue,
         };
 
-        window.set_decorations(create_info.decorations);
-        window.set_position(create_info.position);
-        window.set_size(create_info.size);
+        window.set_position(create_info.position)?;
+        window.set_size(create_info.size)?;
+        window.set_mode(create_info.mode)?;
+        window.set_title(create_info.title.clone())?;
+
+        window.state.resources.surface.commit();
+
+        window.wl_event_queue.flush();
 
         Ok(window)
     }
@@ -127,20 +126,16 @@ impl PlatformWindow for WlWindow {
         todo!()
     }
 
-    fn update_size_and_position(&mut self) -> WindowResult<(UVec2, IVec2)> {
-        todo!()
-    }
-
     fn mode(&self) -> WindowMode {
         todo!()
     }
 
-    fn raw_handle(&self) -> u32 {
+    fn raw_handle(&self) -> u64 {
         todo!()
     }
 
     fn handle(&self) -> WindowHandle {
-        WindowHandle::from_raw(1u32)
+        self.state.handle
     }
 
     fn title(&self) -> &str {
@@ -154,24 +149,39 @@ impl PlatformWindow for WlWindow {
     fn set_size(&mut self, size: UVec2) -> WindowResult<()> {
         let [width, height] = [size.x as i32, size.y as i32];
 
+        println!("setting window size: {:?}", [width, height]);
+
         self.state
             .resources
             .xdg_surface
-            .set_window_geometry(0, 25, width, height);
+            .set_window_geometry(0, 0, width, height);
 
-        self.wl_event_queue.flush();
+        self.wl_event_queue.flush().unwrap();
 
         Ok(())
     }
 
-    fn set_position(&mut self, position: IVec2) -> WindowResult<()> {
+    fn set_position(&mut self, _position: IVec2) -> WindowResult<()> {
         Ok(())
     }
 
     fn set_mode(&mut self, mode: WindowMode) -> WindowResult<()> {
         match mode {
             WindowMode::Fullscreen => self.state.resources.xdg_toplevel.set_fullscreen(None),
-            WindowMode::Windowed => self.state.resources.xdg_toplevel.unset_fullscreen(),
+            WindowMode::Windowed => {
+                self.state.resources.xdg_toplevel.unset_fullscreen();
+                self.state
+                    .resources
+                    .decorations
+                    .set_mode(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+            }
+            WindowMode::WindowedBorderless => {
+                self.state.resources.xdg_toplevel.unset_fullscreen();
+                self.state
+                    .resources
+                    .decorations
+                    .set_mode(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            }
         }
 
         self.wl_event_queue.flush();
@@ -185,26 +195,6 @@ impl PlatformWindow for WlWindow {
         self.wl_event_queue.flush();
 
         Ok(())
-    }
-
-    fn set_decorations(&mut self, decorations: bool) -> WindowResult<()> {
-        self.state.resources.decorations.set_mode(if decorations {
-            zxdg_toplevel_decoration_v1::Mode::ServerSide
-        } else {
-            zxdg_toplevel_decoration_v1::Mode::ClientSide
-        });
-
-        self.wl_event_queue.flush();
-
-        Ok(())
-    }
-
-    fn map(&mut self) -> WindowResult<()> {
-        Ok(())
-    }
-
-    fn unmap(&mut self) -> WindowResult<()> {
-        todo!()
     }
 
     fn minimize(&mut self) -> WindowResult<()> {
@@ -223,7 +213,12 @@ impl PlatformWindow for WlWindow {
         todo!()
     }
 
-    fn handle_events(&mut self, event_queue: &mut bizarre_event::EventQueue) -> WindowResult<()> {
+    fn process_events(&mut self, event_queue: &mut bizarre_event::EventQueue) -> WindowResult<()> {
+        self.state
+            .resources
+            .surface
+            .damage(0, 0, i32::MAX, i32::MAX);
+
         self.wl_event_queue.flush().unwrap();
 
         self.wl_event_queue
@@ -261,6 +256,10 @@ impl PlatformWindow for WlWindow {
     fn close_requested(&self) -> bool {
         self.state.close_requested
     }
+
+    fn close(&mut self) -> WindowResult<()> {
+        todo!()
+    }
 }
 
 impl Dispatch<XdgSurface, (), WlWindowState> for WlWindowState {
@@ -272,10 +271,11 @@ impl Dispatch<XdgSurface, (), WlWindowState> for WlWindowState {
         conn: &wayland_client::Connection,
         qhandle: &wayland_client::QueueHandle<WlWindowState>,
     ) {
+        println!("xdg_surface: {event:#?}");
         match event {
             xdg_surface::Event::Configure { serial } => {
-                println!("XdgSurface: acknowledging configure: {serial}");
-                state.resources.xdg_surface.ack_configure(serial)
+                proxy.ack_configure(serial);
+                state.resources.surface.commit();
             }
             _ => (),
         }
@@ -299,7 +299,14 @@ impl Dispatch<XdgToplevel, ()> for WlWindowState {
                     .push(WindowEvent::Close(state.handle));
                 state.close_requested = true;
             }
-            _ => (),
+            xdg_toplevel::Event::Configure { width, height, .. } => {
+                if width == 0 || height == 0 {
+                    return;
+                }
+
+                state.resize(qhandle, width, height);
+            }
+            _ => {}
         }
     }
 }

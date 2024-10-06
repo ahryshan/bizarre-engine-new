@@ -1,6 +1,6 @@
 use nalgebra_glm::{IVec2, UVec2};
 
-use crate::{WindowAction, WindowMode};
+use crate::WindowMode;
 
 /// Window create info
 ///
@@ -16,53 +16,41 @@ pub struct WindowCreateInfo {
     /// transition to normal mode.
     pub size: UVec2,
     /// Position hint for the underlying API. There is no guarantee, that
-    /// window will be created with the specified size, and that depends on the
+    /// window will be created with the specified position, and that depends on the
     /// API and window manager
     pub position: IVec2,
     /// Window title
     pub title: String,
     pub mode: WindowMode,
-    pub decorations: bool,
     pub maximized: bool,
-    pub minimized: bool,
-    pub allowed_actions: Vec<WindowAction>,
 }
 
 impl WindowCreateInfo {
     pub fn normal_window(title: String, size: UVec2) -> Self {
         Self {
             maximized: false,
-            minimized: false,
             mode: WindowMode::Windowed,
             position: [0, 0].into(),
             title,
             size,
-            decorations: true,
-            allowed_actions: WindowAction::all(),
         }
     }
 
     pub fn no_border_window(title: String, size: UVec2) -> Self {
         Self {
             maximized: false,
-            minimized: false,
-            mode: WindowMode::Windowed,
+            mode: WindowMode::WindowedBorderless,
             position: [0, 0].into(),
             title,
             size,
-            decorations: false,
-            allowed_actions: WindowAction::all(),
         }
     }
 
     pub fn splash_window(title: String, size: UVec2) -> Self {
         Self {
             maximized: false,
-            minimized: false,
-            mode: WindowMode::Windowed,
-            decorations: false,
+            mode: WindowMode::WindowedBorderless,
             size,
-            allowed_actions: [WindowAction::Close, WindowAction::ChangeDesktop].to_vec(),
             title,
             position: [0, 0].into(),
         }
@@ -71,7 +59,6 @@ impl WindowCreateInfo {
     pub fn fullscreen_window(title: String) -> Self {
         Self {
             mode: WindowMode::Fullscreen,
-            allowed_actions: vec![WindowAction::Close, WindowAction::ChangeDesktop],
             ..Self::normal_window(title, [600, 400].into())
         }
     }

@@ -18,10 +18,24 @@ impl EcsModule for MainEcsModule {
 fn main() -> Result<()> {
     AppBuilder::default()
         .with_name("Bizarre Engine")
-        .with_module(WindowModule::new().with_window(
-            WindowCreateInfo::normal_window("Bizarre Window".into(), UVec2::new(800, 600)),
-            true,
-        ))
+        // .with_module(WindowModule::new().with_window(
+        //     WindowCreateInfo::fullscreen_window("Bizarre Window".into()),
+        //     true,
+        // ))
+        .with_module(
+            WindowModule::new()
+                .with_window(
+                    WindowCreateInfo::normal_window("Bizarre Window".into(), UVec2::new(800, 600)),
+                    true,
+                )
+                .with_window(
+                    WindowCreateInfo::normal_window(
+                        "Bizarre Window 2".into(),
+                        UVec2::new(1280, 720),
+                    ),
+                    false,
+                ),
+        )
         .with_module(InputModule)
         .with_module(MainEcsModule)
         .build()

@@ -1,28 +1,22 @@
 use core::sync::atomic;
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
     io::ErrorKind,
-    os::fd::{AsFd, OwnedFd},
+    os::fd::AsFd,
     ptr::{self},
     slice,
     sync::{atomic::AtomicUsize, LazyLock, RwLock},
 };
 
-use rustix::{
-    fs::ftruncate,
-    mm::{munmap, MapFlags, ProtFlags},
-};
+use rustix::mm::{munmap, MapFlags, ProtFlags};
 use wayland_client::{
     backend::WaylandError,
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
-        wl_buffer::WlBuffer,
         wl_compositor::WlCompositor,
         wl_registry::WlRegistry,
         wl_seat::WlSeat,
         wl_shm::{self, WlShm},
-        wl_shm_pool::WlShmPool,
     },
     Connection, Dispatch, Proxy, QueueHandle,
 };
@@ -34,11 +28,10 @@ use wayland_protocols::xdg::{
     shell::client::xdg_wm_base::{self, XdgWmBase},
 };
 
-use crate::{window_error::WindowResult, WindowHandle};
+use crate::window_error::WindowResult;
 
 use super::{
-    shared_memory::SharedMemory,
-    wl_window::{WlWindowResources, WlWindowState},
+    shared_memory::SharedMemory, wl_window::WlWindowResources, wl_window_state::WlWindowState,
 };
 
 pub(crate) static WL_CONTEXT: LazyLock<RwLock<WaylandContext>> =
@@ -175,8 +168,6 @@ impl WaylandContext {
 
         let keyboard = self.state.seat.get_keyboard(&qh, ());
 
-        event_queue.flush();
-
         let resources = WlWindowResources {
             buffer,
             pool,
@@ -267,10 +258,9 @@ impl Dispatch<XdgWmBase, ()> for WaylandState {
         println!("xdg_wm_base dispatch");
         match event {
             xdg_wm_base::Event::Ping { serial } => {
-                println!("Got ping: pong");
                 state.xdg.pong(serial);
             }
-            _ => todo!(),
+            _ => {}
         }
     }
 }

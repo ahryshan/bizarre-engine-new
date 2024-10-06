@@ -30,14 +30,14 @@ impl EcsModule for WindowModule {
         let mut window_manager = WindowManager::new();
 
         for (main_window, create_info) in self.windows {
-            let (h, w) = window_manager.create_window(&create_info).unwrap();
-
-            w.map();
+            let (h, _) = window_manager.create_window(&create_info).unwrap();
 
             if main_window {
                 window_manager.set_main_window(h);
             }
         }
+
+        println!("{:#?}", window_manager.iter().collect::<Vec<_>>());
 
         world.insert_resource(window_manager);
         world.add_systems(Schedule::Preupdate, process_window_events);
@@ -54,7 +54,7 @@ pub fn process_window_events(
 
     window_manager
         .iter_mut()
-        .for_each(|(_, w)| w.handle_events(&mut event_queue).unwrap());
+        .for_each(|(_, w)| w.process_events(&mut event_queue).unwrap());
 
     if let Some(close_requested) = window_manager
         .get_main_window()

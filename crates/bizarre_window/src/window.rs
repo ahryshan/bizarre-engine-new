@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 use bizarre_core::Handle;
 use bizarre_event::EventReader;
@@ -12,6 +15,7 @@ pub enum WindowMode {
     Fullscreen,
     #[default]
     Windowed,
+    WindowedBorderless,
 }
 
 pub struct WindowStatus {
@@ -28,14 +32,23 @@ pub struct Window {
     event_reader: Option<EventReader>,
 }
 
+impl Debug for Window {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Window")
+            .field("handle", &self.handle)
+            .field("event_reader", &self.event_reader)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Window {
     pub fn new(create_info: &WindowCreateInfo) -> WindowResult<Self> {
         let inner = {
             cfg_if! {
                 if #[cfg(target_os = "linux")] {
-                    use crate::linux::linux_window::LinuxWindow;
+                    use crate::linux::linux_window::create_linux_window;
 
-                    Box::new(LinuxWindow::new(create_info)?)
+                    create_linux_window(create_info)?
                 } else {
                     todo!("Only linux is supported at the moment")
                 }
