@@ -10,7 +10,7 @@ members = [
     "crates/bizarre_ecs",
     "crates/bizarre_memory",
     "crates/bizarre_utils",
-    "crates/bizarre_input",
+    "crates/bizarre_input", "crates/bizarre_log",
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 
@@ -20,4 +20,4 @@ anyhow = "1.0.82"
 thiserror = "1.0.61"
 bitflags = "2.6.0"
 lazy_static = "1.5.0"
-
+chrono = "0.4.38"

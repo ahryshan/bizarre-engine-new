@@ -1,0 +1,11 @@
+use std::marker::PhantomData;
+
+use bizarre_core::builder::BuilderTypeState;
+
+use crate::{log_target::LogTarget, LogLevel};
+
+pub struct Logger {
+    label: &'static str,
+    min_level: LogLevel,
+    targets: Box<[Box<dyn LogTarget>]>,
+}

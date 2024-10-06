@@ -1,0 +1,9 @@
+[package]
+name = "bizarre_log"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
+
+chrono = { workspace = true }

@@ -1,0 +1,6 @@
+#[macro_export]
+macro_rules! escape_sequence {
+    ($($code:expr),*) => {
+        TerminalEscapeSequence{0: std::collections::HashSet::from([$($code),*])}
+    };
+}
