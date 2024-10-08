@@ -10,7 +10,9 @@ members = [
     "crates/bizarre_ecs",
     "crates/bizarre_memory",
     "crates/bizarre_utils",
-    "crates/bizarre_input", "crates/bizarre_log",
+    "crates/bizarre_input",
+    "crates/bizarre_log",
+    "crates/bizarre_config",
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 
@@ -21,3 +23,5 @@ thiserror = "1.0.61"
 bitflags = "2.6.0"
 lazy_static = "1.5.0"
 chrono = "0.4.38"
+serde = { version = "1.0.210", features = ["default", "derive"] }
+toml = "0.8.19"
