@@ -168,12 +168,14 @@ impl WaylandContext {
         surface.commit();
 
         let keyboard = self.state.seat.get_keyboard(&qh, ());
+        let mouse = self.state.seat.get_pointer(&qh, ());
 
         let resources = WlWindowResources {
             buffer,
             pool,
             shm,
             keyboard,
+            mouse,
             surface,
             xdg_surface,
             xdg_toplevel,

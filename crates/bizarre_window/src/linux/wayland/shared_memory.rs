@@ -46,6 +46,7 @@ impl SharedMemory {
         if new_size <= self.size {
             return;
         }
+        self.size = new_size;
         ftruncate(self.as_fd(), new_size as u64);
     }
 

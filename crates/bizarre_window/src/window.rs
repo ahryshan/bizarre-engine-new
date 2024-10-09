@@ -3,6 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use bitflags::bitflags;
 use bizarre_core::Handle;
 use bizarre_event::EventReader;
 use cfg_if::cfg_if;
@@ -18,10 +19,14 @@ pub enum WindowMode {
     WindowedBorderless,
 }
 
-pub struct WindowStatus {
-    pub minimized: bool,
-    pub maximized: bool,
-    pub mapped: bool,
+bitflags! {
+    #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct WindowStatus: u8 {
+        const MINIMIZED         = 0b0000_0001;
+        const MAXIMIZED         = 0b0000_0010;
+        const KEYBOARD_FOCUS    = 0b0000_0100;
+        const MOUSE_FOCUS       = 0b0000_1000;
+    }
 }
 
 pub type WindowHandle = Handle<Window>;

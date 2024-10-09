@@ -1,7 +1,8 @@
+use bizarre_log::core_trace;
 use nalgebra_glm::{IVec2, UVec2};
 use wayland_client::{protocol::wl_shm, QueueHandle};
 
-use crate::{window_events::WindowEvent, WindowHandle, WindowMode};
+use crate::{window_events::WindowEvent, WindowHandle, WindowMode, WindowStatus};
 
 use super::wl_window::WlWindowResources;
 
@@ -14,6 +15,7 @@ pub(crate) struct WlWindowState {
     pub(crate) mode: WindowMode,
     pub(crate) close_requested: bool,
     pub(crate) resources: WlWindowResources,
+    pub(crate) status: WindowStatus,
 }
 
 impl WlWindowState {

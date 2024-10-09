@@ -1,7 +1,8 @@
-use bitflags::bitflags;
 use bizarre_ecs::prelude::*;
 use bizarre_event::{EventQueue, EventReader};
+use bizarre_log::core_trace;
 use bizarre_window::window_events::WindowEvent;
+use nalgebra_glm::Vec2;
 
 use crate::{
     event::{InputEvent, InputEventSource},
@@ -16,10 +17,15 @@ const BUTTON_COUNT: usize = 32;
 pub struct InputManager {
     keys: [bool; KEY_COUNT],
     prev_keys: [bool; KEY_COUNT],
+    keyboard_modifiers: KeyboardModifier,
+
     buttons: [bool; BUTTON_COUNT],
     prev_buttons: [bool; BUTTON_COUNT],
+
+    pointer_position: Vec2,
+    prev_pointer_position: Vec2,
+
     event_reader: Option<EventReader>,
-    keyboard_modifiers: KeyboardModifier,
 }
 
 impl Default for InputManager {
@@ -27,10 +33,12 @@ impl Default for InputManager {
         Self {
             keys: [false; _],
             prev_keys: [false; _],
+            keyboard_modifiers: KeyboardModifier::None,
             buttons: [false; _],
             prev_buttons: [false; _],
+            pointer_position: Vec2::zeros(),
+            prev_pointer_position: Vec2::zeros(),
             event_reader: None,
-            keyboard_modifiers: KeyboardModifier::None,
         }
     }
 }
@@ -62,6 +70,14 @@ impl InputManager {
 
     pub fn button_just_pressed(&self, button: MouseButton) -> bool {
         self.buttons[button.as_usize()] && !self.prev_buttons[button.as_usize()]
+    }
+
+    pub fn pointer_delta(&self) -> Vec2 {
+        self.pointer_position - self.prev_pointer_position
+    }
+
+    pub fn pointer_position(&self) -> Vec2 {
+        self.pointer_position
     }
 
     pub fn handle_events(&mut self, eq: &mut EventQueue) {
@@ -98,6 +114,15 @@ impl InputManager {
                             source: InputEventSource::Window(*handle),
                         })
                     }
+                    WindowEvent::MouseMove { handle, position } => {
+                        self.pointer_position = *position;
+
+                        Some(InputEvent::PointerMove {
+                            source: InputEventSource::Window(*handle),
+                            position: *position,
+                            delta: self.pointer_delta(),
+                        })
+                    }
                     _ => None,
                 })
                 .flatten()
@@ -108,5 +133,6 @@ impl InputManager {
     pub fn change_frames(&mut self) {
         std::mem::swap(&mut self.keys, &mut self.prev_keys);
         std::mem::swap(&mut self.buttons, &mut self.prev_buttons);
+        self.prev_pointer_position = self.pointer_position;
     }
 }

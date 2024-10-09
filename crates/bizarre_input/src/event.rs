@@ -1,5 +1,5 @@
-use bizarre_event::Event;
 use bizarre_window::WindowHandle;
+use nalgebra_glm::Vec2;
 
 use crate::keyboard::{Keyboard, KeyboardModifier};
 
@@ -23,5 +23,10 @@ pub enum InputEvent {
         source: InputEventSource,
         modifiers: KeyboardModifier,
         key: Keyboard,
+    },
+    PointerMove {
+        source: InputEventSource,
+        position: Vec2,
+        delta: Vec2,
     },
 }

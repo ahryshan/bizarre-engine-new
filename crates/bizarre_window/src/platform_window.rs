@@ -28,9 +28,9 @@ pub trait PlatformWindow {
     fn set_mode(&mut self, mode: WindowMode) -> WindowResult<()>;
     fn set_title(&mut self, title: String) -> WindowResult<()>;
     fn minimize(&mut self) -> WindowResult<()>;
-    fn restore(&mut self) -> WindowResult<()>;
     fn maximize(&mut self) -> WindowResult<()>;
     fn unmaximize(&mut self) -> WindowResult<()>;
+    fn toggle_maximize(&mut self) -> WindowResult<()>;
 
     /// Processes events from underlying windowing system and from the window itself.
     /// In most cases it will push new events to the provided [EventQueue]

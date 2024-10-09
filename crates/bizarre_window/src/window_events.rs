@@ -1,4 +1,4 @@
-use nalgebra_glm::{IVec2, UVec2};
+use nalgebra_glm::{IVec2, UVec2, Vec2};
 
 use crate::window::WindowHandle;
 
@@ -22,6 +22,17 @@ pub enum WindowEvent {
         handle: WindowHandle,
         keycode: usize,
     },
+    KeyboardModifierChange {
+        handle: WindowHandle,
+    },
+    MouseMove {
+        handle: WindowHandle,
+        position: Vec2,
+    },
+    GainedKeyboardFocus(WindowHandle),
+    LostKeyboardFocus(WindowHandle),
+    GainedMouseFocus(WindowHandle),
+    LostMouseFocus(WindowHandle),
 }
 
 impl WindowEvent {
@@ -33,7 +44,13 @@ impl WindowEvent {
             | Moved { handle, .. }
             | KeyPress { handle, .. }
             | KeyRelease { handle, .. }
-            | MainWindowCloseRequest(handle) => *handle,
+            | KeyboardModifierChange { handle, .. }
+            | MouseMove { handle, .. }
+            | GainedKeyboardFocus(handle)
+            | LostKeyboardFocus(handle)
+            | MainWindowCloseRequest(handle)
+            | GainedMouseFocus(handle)
+            | LostMouseFocus(handle) => *handle,
         }
     }
 }

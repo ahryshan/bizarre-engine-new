@@ -3,14 +3,14 @@ use std::{
     io::ErrorKind,
 };
 
-use bizarre_event::EventQueue;
-use nalgebra_glm::{IVec2, U8Vec2, UVec2};
+use nalgebra_glm::{IVec2, UVec2, Vec2};
 use wayland_client::{
     backend::WaylandError,
     delegate_noop,
     protocol::{
         wl_buffer::WlBuffer,
         wl_keyboard::{self, WlKeyboard},
+        wl_pointer::{self, WlPointer},
         wl_shm::WlShm,
         wl_shm_pool::WlShmPool,
         wl_surface::WlSurface,
@@ -43,6 +43,7 @@ pub struct WlWindowResources {
     pub(crate) pool: WlShmPool,
     pub(crate) buffer: WlBuffer,
     pub(crate) keyboard: WlKeyboard,
+    pub(crate) mouse: WlPointer,
     pub(crate) surface: WlSurface,
     pub(crate) xdg_surface: XdgSurface,
     pub(crate) xdg_toplevel: XdgToplevel,
@@ -51,6 +52,8 @@ pub struct WlWindowResources {
 
 impl Drop for WlWindowResources {
     fn drop(&mut self) {
+        self.keyboard.release();
+        self.mouse.release();
         self.decorations.destroy();
         self.xdg_toplevel.destroy();
         self.xdg_surface.destroy();
@@ -98,6 +101,7 @@ impl PlatformWindow for WlWindow {
             close_requested: false,
             mode: create_info.mode,
             resources,
+            status: WindowStatus::empty(),
         };
 
         let mut window = WlWindow {
@@ -126,11 +130,11 @@ impl PlatformWindow for WlWindow {
     }
 
     fn mode(&self) -> WindowMode {
-        todo!()
+        self.state.mode
     }
 
     fn raw_handle(&self) -> u64 {
-        todo!()
+        self.handle().as_raw() as u64
     }
 
     fn handle(&self) -> WindowHandle {
@@ -138,11 +142,11 @@ impl PlatformWindow for WlWindow {
     }
 
     fn title(&self) -> &str {
-        todo!()
+        &self.state.title
     }
 
     fn status(&self) -> crate::WindowStatus {
-        todo!()
+        self.state.status
     }
 
     fn set_size(&mut self, size: UVec2) -> WindowResult<()> {
@@ -195,19 +199,33 @@ impl PlatformWindow for WlWindow {
     }
 
     fn minimize(&mut self) -> WindowResult<()> {
-        todo!()
-    }
-
-    fn restore(&mut self) -> WindowResult<()> {
-        todo!()
+        self.state.resources.xdg_toplevel.set_minimized();
+        self.state.status |= WindowStatus::MINIMIZED;
+        Ok(())
     }
 
     fn maximize(&mut self) -> WindowResult<()> {
-        todo!()
+        self.state.resources.xdg_toplevel.set_maximized();
+        self.state.status |= WindowStatus::MAXIMIZED;
+        Ok(())
     }
 
     fn unmaximize(&mut self) -> WindowResult<()> {
-        todo!()
+        self.state.resources.xdg_toplevel.unset_maximized();
+        self.state.status.remove(WindowStatus::MAXIMIZED);
+        Ok(())
+    }
+
+    fn toggle_maximize(&mut self) -> WindowResult<()> {
+        if self.state.status.intersects(WindowStatus::MAXIMIZED) {
+            self.state.resources.xdg_toplevel.unset_maximized();
+            self.state.status.remove(WindowStatus::MAXIMIZED);
+            Ok(())
+        } else {
+            self.state.resources.xdg_toplevel.set_maximized();
+            self.state.status |= WindowStatus::MAXIMIZED;
+            Ok(())
+        }
     }
 
     fn process_events(&mut self, event_queue: &mut bizarre_event::EventQueue) -> WindowResult<()> {
@@ -337,6 +355,10 @@ impl Dispatch<WlKeyboard, ()> for WlWindowState {
                 key,
                 state,
             } => {
+                if !window_state.status.intersects(WindowStatus::KEYBOARD_FOCUS) {
+                    return;
+                }
+
                 let keycode = (key + 8) as usize;
                 let handle = window_state.handle;
 
@@ -354,7 +376,60 @@ impl Dispatch<WlKeyboard, ()> for WlWindowState {
 
                 window_state.internal_event_queue.push(event);
             }
+            wl_keyboard::Event::Enter { surface, .. } => {
+                if surface == window_state.resources.surface {
+                    window_state.status |= WindowStatus::KEYBOARD_FOCUS;
+                    window_state
+                        .internal_event_queue
+                        .push(WindowEvent::GainedKeyboardFocus(window_state.handle))
+                }
+            }
+            wl_keyboard::Event::Leave { surface, .. } => {
+                if surface == window_state.resources.surface {
+                    window_state.status.remove(WindowStatus::KEYBOARD_FOCUS);
+                    window_state
+                        .internal_event_queue
+                        .push(WindowEvent::LostKeyboardFocus(window_state.handle))
+                }
+            }
             _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlPointer, ()> for WlWindowState {
+    fn event(
+        state: &mut Self,
+        proxy: &WlPointer,
+        event: <WlPointer as Proxy>::Event,
+        data: &(),
+        conn: &Connection,
+        qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { surface, .. } => {
+                if surface == state.resources.surface {
+                    state.status.insert(WindowStatus::MOUSE_FOCUS);
+                }
+            }
+            wl_pointer::Event::Leave { surface, .. } => {
+                if surface == state.resources.surface {
+                    state.status.remove(WindowStatus::MOUSE_FOCUS);
+                }
+            }
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                if state.status.intersects(WindowStatus::MOUSE_FOCUS) {
+                    state.internal_event_queue.push(WindowEvent::MouseMove {
+                        handle: state.handle,
+                        position: Vec2::new(surface_x as f32, surface_y as f32),
+                    })
+                }
+            }
+            _ => (),
         }
     }
 }
