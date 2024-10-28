@@ -3,8 +3,7 @@ use bizarre_input_proc_macros::define_keys;
 
 define_keys! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(u8)]
-    pub Keyboard {
+    pub Keyboard: u8 {
         (linux: 9) => Ecs,
 
         (linux: 24) => Q,

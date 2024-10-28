@@ -24,23 +24,13 @@ impl EcsModule for MainEcsModule {
     }
 }
 
-fn listen_pointer_moves(window_manager: Res<WindowManager>, input_events: Events<InputEvent>) {
+fn listen_pointer_moves(input_events: Events<InputEvent>) {
     if let Some(events) = input_events.as_ref() {
         for event in events {
-            if let InputEvent::PointerMove {
-                source,
-                position,
-                delta,
-            } = event
-            {
-                let [x, y] = (*position).into();
-                let [dx, dy] = (*delta).into();
-                let InputEventSource::Window(handle) = source;
-                let window = window_manager.get_window(handle).unwrap();
-                info!(
-                    "{}: pointer moved to ({x:.2}, {y:.2}) (d: {dx:.2}, {dy:.2})",
-                    window.title()
-                )
+            if let InputEvent::ButtonPress { button, .. } = event {
+                info!("ButtonPress: {button:?}");
+            } else if let InputEvent::ButtonRelease { button, .. } = event {
+                info!("ButtonRelease: {button:?}");
             }
         }
     }

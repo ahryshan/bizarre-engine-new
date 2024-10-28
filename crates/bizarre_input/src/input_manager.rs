@@ -1,17 +1,17 @@
 use bizarre_ecs::prelude::*;
 use bizarre_event::{EventQueue, EventReader};
-use bizarre_log::core_trace;
+use bizarre_log::{core_info, core_trace};
 use bizarre_window::window_events::WindowEvent;
 use nalgebra_glm::Vec2;
 
 use crate::{
     event::{InputEvent, InputEventSource},
     keyboard::{Keyboard, KeyboardModifier},
-    mouse::MouseButton,
+    mouse::Mouse,
 };
 
 const KEY_COUNT: usize = 256;
-const BUTTON_COUNT: usize = 32;
+const BUTTON_COUNT: usize = u16::MAX as usize;
 
 #[derive(Resource)]
 pub struct InputManager {
@@ -64,11 +64,11 @@ impl InputManager {
         self.keys[key.as_usize()] && !self.prev_keys[key.as_usize()]
     }
 
-    pub fn button_pressed(&self, button: MouseButton) -> bool {
+    pub fn button_pressed(&self, button: Mouse) -> bool {
         self.buttons[button.as_usize()]
     }
 
-    pub fn button_just_pressed(&self, button: MouseButton) -> bool {
+    pub fn button_just_pressed(&self, button: Mouse) -> bool {
         self.buttons[button.as_usize()] && !self.prev_buttons[button.as_usize()]
     }
 
@@ -114,13 +114,32 @@ impl InputManager {
                             source: InputEventSource::Window(*handle),
                         })
                     }
-                    WindowEvent::MouseMove { handle, position } => {
+                    WindowEvent::PointerMove { handle, position } => {
                         self.pointer_position = *position;
 
                         Some(InputEvent::PointerMove {
                             source: InputEventSource::Window(*handle),
                             position: *position,
                             delta: self.pointer_delta(),
+                        })
+                    }
+                    WindowEvent::ButtonPress { handle, button } => {
+                        let button = Mouse::from_raw(*button);
+                        self.buttons[button.as_usize()] = true;
+                        Some(InputEvent::ButtonPress {
+                            source: InputEventSource::Window(*handle),
+                            button,
+                            modifiers: self.keyboard_modifiers,
+                            position: self.pointer_position,
+                        })
+                    }
+                    WindowEvent::ButtonRelease { handle, button } => {
+                        let button = Mouse::from_raw(*button);
+                        self.buttons[button.as_usize()] = true;
+                        Some(InputEvent::ButtonRelease {
+                            source: InputEventSource::Window(*handle),
+                            button,
+                            position: self.pointer_position,
                         })
                     }
                     _ => None,

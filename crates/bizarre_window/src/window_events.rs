@@ -16,18 +16,30 @@ pub enum WindowEvent {
     MainWindowCloseRequest(WindowHandle),
     KeyPress {
         handle: WindowHandle,
-        keycode: usize,
+        keycode: u8,
     },
     KeyRelease {
         handle: WindowHandle,
-        keycode: usize,
+        keycode: u8,
     },
     KeyboardModifierChange {
         handle: WindowHandle,
     },
-    MouseMove {
+    PointerMove {
         handle: WindowHandle,
         position: Vec2,
+    },
+    ButtonPress {
+        handle: WindowHandle,
+        button: u8,
+    },
+    ButtonRelease {
+        handle: WindowHandle,
+        button: u8,
+    },
+    Scroll {
+        handle: WindowHandle,
+        delta: Vec2,
     },
     GainedKeyboardFocus(WindowHandle),
     LostKeyboardFocus(WindowHandle),
@@ -45,7 +57,10 @@ impl WindowEvent {
             | KeyPress { handle, .. }
             | KeyRelease { handle, .. }
             | KeyboardModifierChange { handle, .. }
-            | MouseMove { handle, .. }
+            | PointerMove { handle, .. }
+            | ButtonPress { handle, .. }
+            | ButtonRelease { handle, .. }
+            | Scroll { handle, .. }
             | GainedKeyboardFocus(handle)
             | LostKeyboardFocus(handle)
             | MainWindowCloseRequest(handle)

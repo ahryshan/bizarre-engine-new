@@ -3,6 +3,7 @@ use std::{
     io::ErrorKind,
 };
 
+use bizarre_log::{core_fatal, core_trace};
 use nalgebra_glm::{IVec2, UVec2, Vec2};
 use wayland_client::{
     backend::WaylandError,
@@ -96,7 +97,7 @@ impl PlatformWindow for WlWindow {
             handle,
             internal_event_queue: Default::default(),
             size,
-            position: create_info.position.clone(),
+            pointer_input_frame: Vec::new(),
             title: create_info.title.clone(),
             close_requested: false,
             mode: create_info.mode,
@@ -364,10 +365,14 @@ impl Dispatch<WlKeyboard, ()> for WlWindowState {
 
                 let event = match state {
                     WEnum::Value(val) => match val {
-                        wl_keyboard::KeyState::Pressed => WindowEvent::KeyPress { handle, keycode },
-                        wl_keyboard::KeyState::Released => {
-                            WindowEvent::KeyRelease { handle, keycode }
-                        }
+                        wl_keyboard::KeyState::Pressed => WindowEvent::KeyPress {
+                            handle,
+                            keycode: keycode as u8,
+                        },
+                        wl_keyboard::KeyState::Released => WindowEvent::KeyRelease {
+                            handle,
+                            keycode: keycode as u8,
+                        },
 
                         _ => return,
                     },
@@ -423,11 +428,46 @@ impl Dispatch<WlPointer, ()> for WlWindowState {
                 ..
             } => {
                 if state.status.intersects(WindowStatus::MOUSE_FOCUS) {
-                    state.internal_event_queue.push(WindowEvent::MouseMove {
+                    state.internal_event_queue.push(WindowEvent::PointerMove {
                         handle: state.handle,
                         position: Vec2::new(surface_x as f32, surface_y as f32),
-                    })
+                    });
                 }
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: button_state,
+                ..
+            } => {
+                if state.status.intersects(WindowStatus::MOUSE_FOCUS) {
+                    if let WEnum::Value(val) = button_state {
+                        let event = match val {
+                            wl_pointer::ButtonState::Pressed => WindowEvent::ButtonPress {
+                                handle: state.handle,
+                                button: (button - 272) as u8,
+                            },
+                            wl_pointer::ButtonState::Released => WindowEvent::ButtonRelease {
+                                handle: state.handle,
+                                button: (button - 272) as u8,
+                            },
+                            _ => {
+                                core_fatal!("Wayland returned unnown button state: {val:?}");
+                                return;
+                            }
+                        };
+
+                        state.internal_event_queue.push(event)
+                    }
+                }
+            }
+            wl_pointer::Event::Axis { time, axis, value } => {
+                state.pointer_input_frame.push(event);
+            }
+            wl_pointer::Event::AxisSource { axis_source } => {
+                state.pointer_input_frame.push(event);
+            }
+            wl_pointer::Event::Frame => {
+                state.handle_pointer_input_frame();
             }
             _ => (),
         }

@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-
 use proc_macro2::{Ident, TokenStream};
-use quote::{quote, ToTokens, TokenStreamExt};
+use quote::{quote, ToTokens};
 use syn::{
-    braced, bracketed, parenthesized,
+    braced, parenthesized,
     parse::Parse,
     parse_macro_input,
-    token::{Brace, Colon, Comma, FatArrow},
-    Attribute, LitInt, Token, Visibility,
+    token::{Colon, Comma, FatArrow},
+    Attribute, LitInt, Visibility,
 };
 
 // define_keys {
@@ -21,24 +19,27 @@ struct DefineKeysInput {
     visibility: Visibility,
     attributes: Vec<Attribute>,
     enum_name: Ident,
-    idents: Vec<Ident>,
-    lin: HashMap<Ident, usize>,
-    mac: HashMap<Ident, usize>,
-    win: HashMap<Ident, usize>,
+    repr: Ident,
+    lin: Vec<(Ident, LitInt)>,
+    mac: Vec<(Ident, LitInt)>,
+    win: Vec<(Ident, LitInt)>,
 }
 
 impl Parse for DefineKeysInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut lin_map = HashMap::new();
-        let mut mac_map = HashMap::new();
-        let mut win_map = HashMap::new();
-        let mut idents = Vec::new();
+        let mut lin_map = Vec::new();
+        let mut mac_map = Vec::new();
+        let mut win_map = Vec::new();
 
         let attributes = input.call(Attribute::parse_outer)?;
 
         let visibility = input.parse::<Visibility>().unwrap_or(Visibility::Inherited);
 
         let enum_name = input.parse::<Ident>()?;
+
+        input.parse::<Colon>()?;
+
+        let repr = input.parse::<Ident>()?;
 
         let key_defs;
 
@@ -51,14 +52,12 @@ impl Parse for DefineKeysInput {
             let ident;
 
             if let Ok(val) = key_defs.parse::<LitInt>() {
-                let val: usize = val.base10_parse()?;
-
                 key_defs.parse::<FatArrow>()?;
 
                 ident = key_defs.parse::<Ident>()?;
 
-                mac = Some(val);
-                win = Some(val);
+                mac = Some(val.clone());
+                win = Some(val.clone());
                 lin = Some(val);
             } else {
                 let platforms;
@@ -66,7 +65,7 @@ impl Parse for DefineKeysInput {
 
                 while let Ok(platform) = platforms.parse::<Ident>() {
                     platforms.parse::<Colon>()?;
-                    let val: usize = platforms.parse::<LitInt>()?.base10_parse()?;
+                    let val = platforms.parse::<LitInt>()?;
 
                     match platform.to_string().as_str() {
                         "linux" => lin = Some(val),
@@ -86,18 +85,16 @@ impl Parse for DefineKeysInput {
                 ident = key_defs.parse::<Ident>()?;
             }
 
-            idents.push(ident.clone());
-
             if let Some(keycode) = lin {
-                lin_map.insert(ident.clone(), keycode);
+                lin_map.push((ident.clone(), keycode));
             }
 
             if let Some(keycode) = win {
-                win_map.insert(ident.clone(), keycode);
+                win_map.push((ident.clone(), keycode));
             }
 
             if let Some(keycode) = mac {
-                mac_map.insert(ident, keycode);
+                mac_map.push((ident.clone(), keycode));
             }
 
             if key_defs.is_empty() {
@@ -111,7 +108,7 @@ impl Parse for DefineKeysInput {
             visibility,
             attributes,
             enum_name,
-            idents,
+            repr,
             lin: lin_map,
             mac: mac_map,
             win: win_map,
@@ -124,10 +121,10 @@ pub fn define_keys_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         visibility,
         attributes,
         enum_name,
+        repr,
         lin,
         mac,
         win,
-        idents,
     } = parse_macro_input!(input as DefineKeysInput);
 
     let attributes = attributes
@@ -135,79 +132,97 @@ pub fn define_keys_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         .map(|attr| attr.into_token_stream())
         .collect::<Vec<_>>();
 
-    let linux_from_raw = impl_from_raw(&lin);
-    let linux_as_usize = impl_as_usize(&lin);
+    let lin_members = gen_members(&repr, &lin);
+    let win_members = gen_members(&repr, &win);
+    let mac_members = gen_members(&repr, &mac);
 
-    let win_from_raw = impl_from_raw(&win);
-    let win_as_usize = impl_as_usize(&win);
-
-    let mac_from_raw = impl_from_raw(&mac);
-    let mac_as_usize = impl_as_usize(&mac);
+    let lin_converts = gen_converts(&repr, &lin);
+    let win_converts = gen_converts(&repr, &win);
+    let mac_converts = gen_converts(&repr, &mac);
 
     quote! {
+        #[cfg(target_os = "linux")]
         #(#attributes)*
+        #[repr(#repr)]
         #visibility enum #enum_name {
-            #(#idents,)*
-            Unknown(usize),
+            #lin_members
+        }
+
+        #[cfg(target_os = "macos")]
+        #(#attributes)*
+        #[repr(#repr)]
+        #visibility enum #enum_name {
+            #mac_members
+        }
+
+        #[cfg(target_os = "windows")]
+        #(#attributes)*
+        #[repr(#repr)]
+        #visibility enum #enum_name {
+            #win_members
         }
 
         #[cfg(target_os = "linux")]
         impl #enum_name {
-            #linux_from_raw
-
-            #linux_as_usize
+            #lin_converts
         }
 
         #[cfg(target_os = "macos")]
         impl enum_name {
-            #mac_from_raw
-
-            #mac_as_usize
+            #mac_converts
         }
 
         #[cfg(target_os = "windows")]
         impl enum_name {
-            #win_from_raw
-
-            #win_as_usize
+            #win_converts
         }
     }
     .into()
 }
 
-fn impl_as_usize(map: &HashMap<Ident, usize>) -> TokenStream {
-    let arms = map.iter().map(|(ident, raw)| {
+fn gen_members(repr: &Ident, map: &Vec<(Ident, LitInt)>) -> TokenStream {
+    let members = map.iter().map(|(ident, _)| {
         quote! {
-            Self::#ident => #raw
+            #ident
         }
     });
 
     quote! {
-        pub fn as_usize(&self) -> usize {
-            match self {
-                #(#arms,)*
-                Self::Unknown(val) => *val
-            }
-        }
+        #(#members,)*
+        Unknown(#repr),
     }
 }
 
-fn impl_from_raw(map: &HashMap<Ident, usize>) -> TokenStream {
-    let arms = map
-        .iter()
-        .map(|(ident, raw)| {
-            quote! {
-                #raw => Self::#ident
-            }
-        })
-        .collect::<Vec<_>>();
+fn gen_converts(repr: &Ident, map: &Vec<(Ident, LitInt)>) -> TokenStream {
+    let from_raw_arms = map.iter().map(|(ident, lit)| {
+        quote! {
+            #lit => Self::#ident
+        }
+    });
+
+    let into_raw_arms = map.iter().map(|(ident, lit)| {
+        quote! {
+            Self::#ident => #lit
+        }
+    });
 
     quote! {
-        pub fn from_raw(value: usize) -> Self {
-            match value {
-                #(#arms,)*
-                _ => Self::Unknown(value)
+        pub fn from_raw(val: #repr) -> Self {
+            match val {
+                #(#from_raw_arms,)*
+                _ => Self::Unknown(val),
             }
+        }
+
+        pub fn into_raw(self) -> #repr {
+            match self {
+                #(#into_raw_arms,)*
+                Self::Unknown(val) => val,
+            }
+        }
+
+        pub fn as_usize(self) -> usize {
+            self.into_raw() as usize
         }
     }
 }

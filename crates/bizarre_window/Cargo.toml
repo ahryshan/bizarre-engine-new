@@ -22,6 +22,7 @@ wayland-protocols = { version = "0.32.4", optional = true, features = [
   "client",
   "unstable"
 ] }
+input = { version = "0.9.1", optional = true }
 tempfile = { version = "3.10.1", features = ["nightly"] }
 bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
 bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
@@ -31,4 +32,4 @@ rustix = { version = "0.38.37", features = ["std", "use-libc-auxv", "mm", "shm"]
 [features]
 default = ["wayland", "x11"]
 x11 = ["dep:xcb"]
-wayland = ["dep:wayland-client", "dep:wayland-protocols"]
+wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:input"]
