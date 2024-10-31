@@ -7,3 +7,5 @@ pub enum Schedule {
     /// Should be called every frame
     Update,
 }
+
+pub struct Schedule2 {}

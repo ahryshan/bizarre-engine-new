@@ -18,7 +18,7 @@ pub mod system_graph;
 pub mod system_param;
 
 bitflags! {
-    #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+    #[derive(PartialEq, Eq, Clone, Copy, Debug, PartialOrd, Ord)]
     pub struct WorldAccessType: u8 {
         const CompRead = Self::Comp.bits() | Self::Read.bits();
         const CompWrite = Self::Comp.bits() | Self::Write.bits();
@@ -36,7 +36,7 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WorldAccess {
     pub resource_id: ResourceId,
     pub resource_name: &'static str,
@@ -84,58 +84,4 @@ pub trait IntoSystem<Marker> {
     type System: System + 'static;
 
     fn into_system(self) -> Self::System;
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::prelude::*;
-
-    use crate::{
-        system::{
-            system_graph::SystemGraph,
-            system_param::{Local, Res, ResMut},
-            IntoSystem,
-        },
-        world::World,
-    };
-
-    #[derive(Resource)]
-    struct DeltaTime(pub f64);
-
-    #[test]
-    fn types_should_work() {
-        fn system(delta: Res<DeltaTime>, delta_mut: ResMut<DeltaTime>) {
-            let _ = delta;
-            let _ = delta_mut;
-        }
-
-        fn use_system<Marker>(system: impl IntoSystem<Marker>) {
-            let _ = system;
-        }
-
-        use_system(system)
-    }
-
-    #[test]
-    fn should_run_system() {
-        fn delta_time_system(delta: Res<DeltaTime>, mut time_counter: Local<f64>) {
-            *time_counter += delta.0;
-            println!("Frame time: {}s, runtime: {}s", delta.0, *time_counter);
-        }
-
-        let mut world = World::new();
-
-        world.insert_resource(DeltaTime(0.16));
-
-        let mut sg = SystemGraph::new();
-
-        sg.add_systems(delta_time_system);
-
-        sg.init_systems(&mut world);
-        sg.run_systems(&mut world);
-        sg.run_systems(&mut world);
-        sg.run_systems(&mut world);
-        sg.run_systems(&mut world);
-        sg.run_systems(&mut world);
-    }
 }

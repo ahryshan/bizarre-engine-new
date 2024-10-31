@@ -140,6 +140,7 @@ impl ComponentRegistry {
     }
 
     pub fn insert_batch<T: ComponentBatch>(&mut self, entity: Entity, batch: T) {
+        T::register(self);
         batch.insert(self, entity);
     }
 

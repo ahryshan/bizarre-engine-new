@@ -72,10 +72,20 @@ where
 {
     fn into_system_configs(self) -> SystemConfigs;
 
+    /// System graph will try to place this system after the provided systems
+    ///
+    /// # Notes
+    /// **EXTREMELY BUGGY AT THE MOMENT.** Better try to place systems
+    /// in right order yourself
     fn after<M>(self, other: impl IntoSystemConfigs<M>) -> SystemConfigs {
         self.into_system_configs().after(other)
     }
 
+    /// System graph will try to place this system before the provided systems
+    ///
+    /// # Notes
+    /// **EXTREMELY BUGGY AT THE MOMENT.** Better try to place systems
+    /// in right order yourself
     fn before<M>(self, other: impl IntoSystemConfigs<M>) -> SystemConfigs {
         self.into_system_configs().before(other)
     }

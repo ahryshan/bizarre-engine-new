@@ -14,7 +14,8 @@ pub mod world;
 
 pub mod prelude {
     pub use crate::{
-        component::Component,
+        component::{component_batch::ComponentBatch, Component, ComponentRegistry},
+        entity::Entity,
         query::Query,
         resource::{Resource, ResourceId},
         system::{

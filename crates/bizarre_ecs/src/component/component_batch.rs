@@ -4,6 +4,8 @@ use crate::entity::Entity;
 
 use super::{Component, ComponentRegistry};
 
+pub use bizarre_ecs_proc_macro::ComponentBatch;
+
 pub trait ComponentBatch {
     fn register(components: &mut ComponentRegistry);
     fn insert(self, components: &mut ComponentRegistry, entity: Entity);
