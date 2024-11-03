@@ -6,7 +6,7 @@ use bizarre_ecs::{
     world::{ecs_module::EcsModule, World},
 };
 use bizarre_event::EventQueue;
-use bizarre_window::{window_events::WindowEvent, window_manager::WindowManager, WindowCreateInfo};
+use bizarre_window::{window_manager::WindowManager, WindowCreateInfo};
 
 pub struct WindowModule {
     windows: Vec<(bool, WindowCreateInfo)>,
@@ -19,8 +19,13 @@ impl WindowModule {
         }
     }
 
-    pub fn with_window(mut self, create_info: WindowCreateInfo, main_window: bool) -> Self {
-        self.windows.push((main_window, create_info));
+    pub fn with_window(mut self, create_info: WindowCreateInfo) -> Self {
+        self.windows.push((false, create_info));
+        self
+    }
+
+    pub fn with_main_window(mut self, create_info: WindowCreateInfo) -> Self {
+        self.windows.push((true, create_info));
         self
     }
 }
