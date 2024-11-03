@@ -1,8 +1,13 @@
+use petgraph::{
+    algo::toposort,
+    data::FromElements,
+    graph::{DiGraph, NodeIndex},
+};
 use thiserror::Error;
 
 use crate::{commands::command_buffer::CommandBuffer, world::World};
 
-use super::system_config::{IntoSystemConfigs, SystemConfig, SystemConfigs};
+use super::system_config::{IntoSystemConfigs, SystemConfig, SystemConfigs, SystemMeta};
 
 #[derive(Debug, Error)]
 pub enum SystemGraphError {
@@ -19,14 +24,26 @@ struct FailedDependencies {
 
 pub type SystemGraphResult<T> = Result<T, SystemGraphError>;
 
+pub type DependencyGraph = DiGraph<NodeId, (), usize>;
+
 pub struct SystemGraph {
     systems: Vec<SystemConfig>,
+    cached_toposort: Option<Vec<usize>>,
 }
+
+fn root_system() {}
 
 impl SystemGraph {
     pub fn new() -> Self {
+        let root_system_config =
+            if let SystemConfigs::Config(config) = root_system.into_system_configs() {
+                config
+            } else {
+                unreachable!()
+            };
         Self {
-            systems: Default::default(),
+            systems: vec![root_system_config],
+            cached_toposort: None,
         }
     }
 
@@ -34,7 +51,7 @@ impl SystemGraph {
         let systems = systems.into_system_configs();
 
         match systems {
-            SystemConfigs::Config(config) => self.add_system(config),
+            SystemConfigs::Config(config) => self.systems.push(config),
             SystemConfigs::Configs(configs) => {
                 configs.into_iter().for_each(|s| self.add_systems(s))
             }
@@ -45,88 +62,136 @@ impl SystemGraph {
         self.systems
             .iter_mut()
             .filter(|s| !s.system.is_init())
-            .for_each(|s| s.system.init(unsafe { world.as_unsafe_cell() }))
+            .for_each(|s| s.system.init(unsafe { world.as_unsafe_cell() }));
+
+        if self.cached_toposort.is_none() {
+            let toposort = build_dependency_graph(&self.systems)
+                .1
+                .into_iter()
+                .map(|index| index.index())
+                .collect();
+
+            self.cached_toposort = Some(toposort);
+        }
     }
 
     pub fn run_systems(&mut self, world: &mut World) -> CommandBuffer {
-        self.systems
-            .iter_mut()
-            .filter(|s| s.system.is_init())
-            .filter_map(|s| {
-                s.system.run(unsafe { world.as_unsafe_cell() });
-                s.system.take_deferred()
-            })
-            .fold(CommandBuffer::new(), |mut acc, mut curr| {
-                acc.append(&mut curr);
-                acc
-            })
-    }
-
-    fn check_dependencies(&self, system: SystemConfig) -> SystemGraphResult<()> {
-        todo!()
-    }
-
-    fn add_system(&mut self, system: SystemConfig) {
-        let after_list = system.meta.after.clone();
-        let before_list = system.meta.before.clone();
-
-        if after_list.is_empty() && before_list.is_empty() {
-            self.systems.push(system);
-            return;
-        }
-
-        let (names, reqs) = (
-            self.systems
+        if let Some(toposort) = self.cached_toposort.as_ref() {
+            toposort
                 .iter()
-                .map(|sys| sys.meta.name)
-                .enumerate()
-                .rev()
-                .collect::<Vec<_>>(),
-            before_list,
-        );
-
-        let last_posible_pos = find_suitable_pos(names, reqs);
-
-        let (names, reqs) = (
-            self.systems
-                .iter()
-                .map(|sys| sys.meta.name)
-                .enumerate()
-                .collect::<Vec<_>>(),
-            after_list,
-        );
-
-        let first_posible_pos = find_suitable_pos(names, reqs);
-
-        if first_posible_pos <= last_posible_pos {
-            self.systems.insert(last_posible_pos, system);
+                .map(|i| &raw mut self.systems[*i].system)
+                .filter_map(|s| {
+                    let system = unsafe { &mut **s };
+                    if system.is_init() {
+                        system.run(unsafe { world.as_unsafe_cell() });
+                        system.take_deferred()
+                    } else {
+                        None
+                    }
+                })
+                .fold(CommandBuffer::new(), |mut acc, mut curr| {
+                    acc.append(&mut curr);
+                    acc
+                })
         } else {
-            panic!(
-                "Cannot insert system `{}`: it's impossible to satisfy dependencies",
-                system.meta.name
-            );
-        }
-    }
-}
-
-fn find_suitable_pos(
-    names: Vec<(usize, &'static str)>,
-    mut requirements: Vec<&'static str>,
-) -> usize {
-    let last_index = names.last().map(|val| val.0).unwrap_or(0);
-
-    for (i, name) in names {
-        requirements.retain(|req| *req != name);
-        if requirements.is_empty() {
-            return i;
+            panic!("Trying to execute system graph without initializing systems in it!");
         }
     }
 
-    last_index
+    pub fn dependency_graph(&self) -> (DependencyGraph, Vec<NodeIndex<usize>>) {
+        build_dependency_graph(&self.systems)
+    }
 }
 
 impl Default for SystemGraph {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Debug, Default, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
+pub struct NodeId(usize, &'static str);
+
+impl From<NodeId> for NodeIndex<usize> {
+    fn from(value: NodeId) -> Self {
+        Self::new(value.0)
+    }
+}
+
+fn build_dependency_graph(
+    systems: &[SystemConfig],
+) -> (DiGraph<NodeId, (), usize>, Vec<NodeIndex<usize>>) {
+    let mut en = systems
+        .iter()
+        .filter_map(|sys| {
+            if sys.system.is_init() {
+                Some(sys.meta.clone())
+            } else {
+                None
+            }
+        })
+        .enumerate();
+
+    let mut dag = DiGraph::from_elements(
+        en.clone()
+            .map(|(i, meta)| {
+                let node = NodeId(i, meta.name);
+                petgraph::data::Element::Node { weight: node }
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    let mut skipped_root = en.clone();
+    let root = skipped_root.next().unwrap();
+    let skipped_root = skipped_root;
+
+    let mut edges = skipped_root
+        .clone()
+        .clone()
+        .map(|(i, meta)| {
+            skipped_root
+                .clone()
+                .filter_map(|(n, dep_meta)| {
+                    if dep_meta.before.contains(&meta.name) {
+                        Some((NodeId(n, dep_meta.name), NodeId(i, meta.name)))
+                    } else if dep_meta.after.contains(&meta.name) {
+                        Some((NodeId(i, meta.name), NodeId(n, dep_meta.name)))
+                    } else {
+                        None
+                    }
+                })
+                .chain(vec![(NodeId(0, root.1.name), NodeId(i, meta.name))])
+                .collect::<Vec<_>>()
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+
+    edges.sort();
+    edges.dedup();
+
+    let reduced = edges.iter().filter(|(NodeId(x, _), NodeId(y, _))| {
+        for (z, _) in en.clone() {
+            let has_xz = edges
+                .iter()
+                .find(|(NodeId(maybe_x, _), NodeId(maybe_z, _))| maybe_x == x && *maybe_z == z)
+                .is_some();
+
+            let has_zy = edges
+                .iter()
+                .find(|(NodeId(maybe_z, _), NodeId(maybe_y, _))| *maybe_z == z && maybe_y == y)
+                .is_some();
+
+            if has_xz && has_zy {
+                return false;
+            }
+        }
+
+        true
+    });
+
+    dag.extend_with_edges(reduced);
+
+    let toposort = toposort(&dag, None).unwrap();
+
+    (dag, toposort)
 }
