@@ -17,6 +17,7 @@ pub trait PlatformWindow {
     fn mode(&self) -> WindowMode;
     fn raw_handle(&self) -> u64;
     fn handle(&self) -> WindowHandle;
+    fn raw_window_ptr(&self) -> *const ();
     fn title(&self) -> &str;
 
     fn status(&self) -> WindowStatus;

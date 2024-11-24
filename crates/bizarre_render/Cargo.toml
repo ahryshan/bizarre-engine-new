@@ -1,0 +1,23 @@
+[package]
+name = "bizarre_render"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bizarre_log = { version = "0.1.0", path = "../bizarre_log" }
+bizarre_window = { version = "0.1.0", path = "../bizarre_window" }
+bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
+bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
+
+thiserror = { workspace = true }
+nalgebra-glm = { workspace = true }
+bitflags = { workspace = true }
+
+ash = { version = "0.38.0", features = ["default", "linked"] }
+shaderc = "0.8.3"
+
+
+[features]
+default = ["wayland"]
+
+wayland = []

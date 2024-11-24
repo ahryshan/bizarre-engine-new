@@ -13,6 +13,7 @@ members = [
     "crates/bizarre_input",
     "crates/bizarre_log",
     "crates/bizarre_config",
+    "crates/bizarre_render", 
 ]
 default-members = ["sandbox", "crates/bizarre_engine"]
 

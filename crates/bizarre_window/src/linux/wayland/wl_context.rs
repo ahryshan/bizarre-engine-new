@@ -4,7 +4,7 @@ use std::{
     os::fd::AsFd,
     ptr::{self},
     slice,
-    sync::{atomic::AtomicUsize, LazyLock, RwLock},
+    sync::{atomic::AtomicUsize, LazyLock, Mutex, OnceLock, RwLock},
 };
 
 use bizarre_log::core_info;
@@ -15,9 +15,11 @@ use wayland_client::{
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
         wl_compositor::WlCompositor,
+        wl_display::WlDisplay,
         wl_registry::WlRegistry,
         wl_seat::WlSeat,
         wl_shm::{self, WlShm},
+        wl_surface::WlSurface,
     },
     Connection, Dispatch, Proxy, QueueHandle,
 };
@@ -35,11 +37,23 @@ use super::{
     shared_memory::SharedMemory, wl_window::WlWindowResources, wl_window_state::WlWindowState,
 };
 
-pub(crate) static WL_CONTEXT: LazyLock<RwLock<WaylandContext>> =
-    LazyLock::new(|| RwLock::new(WaylandContext::new()));
+pub(crate) static WL_TEST_SURFACE: OnceLock<WlSurface> = OnceLock::new();
+
+pub(crate) static WL_CONTEXT: LazyLock<RwLock<WaylandContext>> = LazyLock::new(|| {
+    let ctx = WaylandContext::new();
+    let surface = ctx
+        .state
+        .compositor
+        .create_surface(&ctx.event_queue.handle(), ());
+
+    let _ = WL_TEST_SURFACE.set(surface);
+
+    RwLock::new(ctx)
+});
 
 pub struct WaylandContext {
     pub(crate) conn: Connection,
+    pub(crate) display: WlDisplay,
     pub(crate) state: WaylandState,
     pub(crate) event_queue: wayland_client::EventQueue<WaylandState>,
 }
@@ -86,10 +100,13 @@ impl WaylandContext {
 
         conn.roundtrip();
 
+        let display = conn.display();
+
         Self {
             conn,
             event_queue,
             state,
+            display,
         }
     }
 
@@ -163,7 +180,7 @@ impl WaylandContext {
 
         decorations.set_mode(zxdg_toplevel_decoration_v1::Mode::ServerSide);
 
-        surface.attach(Some(&buffer), 0, 0);
+        // surface.attach(Some(&buffer), 0, 0);
         surface.damage(0, 0, i32::MAX, i32::MAX);
         surface.commit();
 
@@ -271,3 +288,4 @@ delegate_noop!(WaylandState: ignore WlCompositor);
 delegate_noop!(WaylandState: ignore ZxdgDecorationManagerV1);
 delegate_noop!(WaylandState: ignore WlShm);
 delegate_noop!(WaylandState: ignore WlSeat);
+delegate_noop!(WaylandState: ignore WlSurface);

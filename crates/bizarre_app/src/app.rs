@@ -50,6 +50,7 @@ impl App {
             }
         }
 
+        self.world.purge();
         shutdown_logging();
 
         Ok(())

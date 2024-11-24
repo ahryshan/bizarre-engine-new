@@ -168,4 +168,17 @@ impl World {
     pub fn entity_count(&self) -> u64 {
         self.spawner.next_id.load(Ordering::SeqCst) - self.spawner.dead.len() as u64
     }
+
+    pub fn purge(&mut self) {
+        self.components.clear();
+        self.schedules.clear();
+        self.resources.clear();
+        unsafe { self.deferred_commands.apply_or_drop_queued(None) }
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        self.purge();
+    }
 }

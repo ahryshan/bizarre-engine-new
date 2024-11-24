@@ -70,6 +70,10 @@ impl Window {
     pub fn handle(&self) -> WindowHandle {
         self.handle
     }
+
+    pub fn raw_window_ptr(&self) -> *const () {
+        self.inner.raw_window_ptr()
+    }
 }
 
 impl Deref for Window {

@@ -9,16 +9,21 @@ unsafe impl<T> Send for Handle<T> {}
 unsafe impl<T> Sync for Handle<T> {}
 
 impl<T> Handle<T> {
-    pub fn as_raw(&self) -> usize {
+    pub const fn as_raw(&self) -> usize {
         self.handle
     }
 
-    pub fn from_raw<U>(raw: U) -> Self
-    where
-        U: Into<Self>,
-    {
-        raw.into()
+    pub const fn from_raw<I: ~const IntoHandleRawValue>(raw: I) -> Self {
+        Self {
+            handle: raw.as_handle_raw_value(),
+            _marker: PhantomData,
+        }
     }
+}
+
+#[const_trait]
+pub trait IntoHandleRawValue {
+    fn as_handle_raw_value(self) -> usize;
 }
 
 macro_rules! impl_from_for_handle {
@@ -29,6 +34,12 @@ macro_rules! impl_from_for_handle {
                     handle: value as usize,
                     ..Default::default()
                 }
+            }
+        }
+
+        impl const IntoHandleRawValue for $from_ty {
+            fn as_handle_raw_value(self) -> usize {
+                self as usize
             }
         }
     };
@@ -42,6 +53,7 @@ macro_rules! impl_from_for_handle {
 impl_from_for_handle!(u16, "16", "32", "64");
 impl_from_for_handle!(u32, "32", "64");
 impl_from_for_handle!(u64, "64");
+impl_from_for_handle!(usize);
 
 impl<T> Hash for Handle<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

@@ -35,8 +35,8 @@ use crate::{
 use super::{shared_memory::SharedMemory, wl_context::WL_CONTEXT, wl_window_state::WlWindowState};
 
 pub struct WlWindow {
-    wl_event_queue: wayland_client::EventQueue<WlWindowState>,
     state: WlWindowState,
+    wl_event_queue: wayland_client::EventQueue<WlWindowState>,
 }
 
 pub struct WlWindowResources {
@@ -123,7 +123,7 @@ impl PlatformWindow for WlWindow {
     }
 
     fn size(&self) -> UVec2 {
-        todo!()
+        UVec2::new(self.state.size.x as u32, self.state.size.y as u32)
     }
 
     fn position(&self) -> IVec2 {
@@ -136,6 +136,10 @@ impl PlatformWindow for WlWindow {
 
     fn raw_handle(&self) -> u64 {
         self.handle().as_raw() as u64
+    }
+
+    fn raw_window_ptr(&self) -> *const () {
+        self.state.resources.surface.id().as_ptr() as _
     }
 
     fn handle(&self) -> WindowHandle {
@@ -319,6 +323,10 @@ impl Dispatch<XdgToplevel, ()> for WlWindowState {
                 }
 
                 state.resize(qhandle, width, height);
+                state.internal_event_queue.push(WindowEvent::Resize {
+                    handle: state.handle,
+                    size: UVec2::new(width as u32, height as u32),
+                })
             }
             _ => {}
         }

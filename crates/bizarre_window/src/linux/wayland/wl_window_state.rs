@@ -26,35 +26,35 @@ impl WlWindowState {
             return;
         }
 
-        self.size = [width, height].into();
+        // self.size = [width, height].into();
 
-        let stride = width * 4;
-        let pool_size = (height * 2 * stride) as usize;
+        // let stride = width * 4;
+        // let pool_size = (height * 2 * stride) as usize;
 
-        self.resources.buffer.destroy();
+        // self.resources.buffer.destroy();
 
-        if pool_size > self.resources.shm.size() {
-            self.resources.shm.resize(pool_size);
-            self.resources.pool.resize(pool_size as i32);
-        }
+        // if pool_size > self.resources.shm.size() {
+        //     self.resources.shm.resize(pool_size);
+        //     self.resources.pool.resize(pool_size as i32);
+        // }
 
-        self.resources.buffer = self.resources.pool.create_buffer(
-            0,
-            width as i32,
-            height as i32,
-            stride as i32,
-            wl_shm::Format::Xrgb8888,
-            qh,
-            (),
-        );
+        // self.resources.buffer = self.resources.pool.create_buffer(
+        //     0,
+        //     width as i32,
+        //     height as i32,
+        //     stride as i32,
+        //     wl_shm::Format::Xrgb8888,
+        //     qh,
+        //     (),
+        // );
 
         self.resources
             .xdg_surface
             .set_window_geometry(0, 0, width as i32, height as i32);
 
-        self.resources
-            .surface
-            .attach(Some(&self.resources.buffer), 0, 0);
+        // self.resources
+        //     .surface
+        //     .attach(Some(&self.resources.buffer), 0, 0);
 
         self.resources.surface.commit();
     }

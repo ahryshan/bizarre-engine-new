@@ -239,6 +239,14 @@ impl ComponentRegistry {
     fn index<T: Component>(&self) -> Option<usize> {
         self.lookup.get(&T::resource_id()).copied()
     }
+
+    pub(crate) fn clear(&mut self) {
+        self.storages.clear();
+        self.lookup.clear();
+        self.index_dumpster.clear();
+        self.entities.clear();
+        self.component_bitmasks.clear();
+    }
 }
 
 impl Default for ComponentRegistry {
