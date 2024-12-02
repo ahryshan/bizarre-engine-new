@@ -8,12 +8,12 @@ use thiserror::Error;
 
 use crate::{
     device::VulkanDevice,
-    image::VulkanImage,
+    image::AttachmentImage,
     instance::VulkanInstance,
     render_target::{ImageRenderTarget, RenderData},
 };
 
-pub type PresentTarget = Handle<PresentTargetData>;
+pub type PresentTargetHandle = Handle<PresentTarget>;
 
 #[derive(Error, Debug)]
 pub enum PresentError {
@@ -76,7 +76,7 @@ impl SwapchainSupportInfo {
     }
 }
 
-pub struct PresentTargetData {
+pub struct PresentTarget {
     surface_loader: ash::khr::surface::Instance,
     surface: vk::SurfaceKHR,
     swapchain_loader: ash::khr::swapchain::Device,
@@ -93,12 +93,11 @@ pub struct PresentTargetData {
     next_image_index: u32,
 }
 
-impl PresentTargetData {
+impl PresentTarget {
     pub(crate) unsafe fn new(
         instance: &VulkanInstance,
         device: &VulkanDevice,
         cmd_pool: vk::CommandPool,
-        render_pass: vk::RenderPass,
         extent: UVec2,
         display: *mut vk::wl_display,
         surface: *mut c_void,
@@ -200,7 +199,7 @@ impl PresentTargetData {
     pub fn record_present(
         &mut self,
         device: &VulkanDevice,
-        render_image: &VulkanImage,
+        render_image: &AttachmentImage,
     ) -> PresentResult<PresentData> {
         let image_acquired = {
             let create_info = vk::SemaphoreCreateInfo::default();
@@ -244,7 +243,7 @@ impl PresentTargetData {
         device: &VulkanDevice,
         cmd: vk::CommandBuffer,
         present_image: vk::Image,
-        render_image: &VulkanImage,
+        render_image: &AttachmentImage,
     ) -> PresentResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::default();
 

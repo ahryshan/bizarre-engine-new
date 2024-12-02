@@ -1,8 +1,9 @@
 use bizarre_ecs::prelude::*;
 
-use crate::material::pipeline::PipelineHandle;
+use crate::{material::pipeline::PipelineHandle, render_pass::RenderPassHandle};
 
 pub struct RenderPackage {
+    pub render_pass: RenderPassHandle,
     pub pipeline: PipelineHandle,
 }
 

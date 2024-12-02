@@ -20,6 +20,7 @@ pub struct VulkanDevice {
     pub(crate) compute_queue: vk::Queue,
     pub(crate) present_queue: vk::Queue,
     pub(crate) cmd_pool: vk::CommandPool,
+    pub(crate) allocator: vma::Allocator,
 }
 
 #[derive(Error, Debug)]
@@ -83,6 +84,26 @@ impl VulkanDevice {
         let memory_properties =
             { unsafe { instance.get_physical_device_memory_properties(physical) } };
 
+        let allocator = {
+            let create_flags = unsafe { instance.enumerate_device_extension_properties(physical) }?
+                .into_iter()
+                .filter_map(|ext| {
+                    VMA_OPT_EXTENSIONS.into_iter().find_map(|vma_ext| {
+                        if vma_ext.name == ext.extension_name_as_c_str().ok()? {
+                            Some(vma::AllocatorCreateFlags::from_bits(vma_ext.flag.bits())?)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .fold(vma::AllocatorCreateFlags::empty(), |acc, curr| acc | curr);
+
+            let mut create_info = vma::AllocatorCreateInfo::new(&instance, &logical, physical);
+            create_info.flags = create_flags;
+
+            unsafe { vma::Allocator::new(create_info) }?
+        };
+
         Ok(Self {
             physical,
             logical,
@@ -92,6 +113,7 @@ impl VulkanDevice {
             present_queue,
             cmd_pool,
             memory_properties,
+            allocator,
         })
     }
 
@@ -355,3 +377,43 @@ fn query_present_support(
         surface_loader.get_physical_device_wayland_presentation_support(dev, queue_index, display)
     }
 }
+
+struct VmaExtension {
+    name: &'static CStr,
+    flag: vma::AllocatorCreateFlags,
+}
+
+const VMA_OPT_EXTENSIONS: &[VmaExtension] = &[
+    VmaExtension {
+        name: ash::khr::dedicated_allocation::NAME,
+        flag: vma::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION,
+    },
+    VmaExtension {
+        name: ash::khr::bind_memory2::NAME,
+        flag: vma::AllocatorCreateFlags::KHR_BIND_MEMORY2,
+    },
+    VmaExtension {
+        name: ash::khr::maintenance4::NAME,
+        flag: vma::AllocatorCreateFlags::KHR_MAINTENANCE4,
+    },
+    VmaExtension {
+        name: ash::khr::maintenance5::NAME,
+        flag: vma::AllocatorCreateFlags::KHR_MAINTENANCE5,
+    },
+    VmaExtension {
+        name: ash::ext::memory_budget::NAME,
+        flag: vma::AllocatorCreateFlags::EXT_MEMORY_BUDGET,
+    },
+    VmaExtension {
+        name: ash::ext::memory_priority::NAME,
+        flag: vma::AllocatorCreateFlags::EXT_MEMORY_PRIORITY,
+    },
+    VmaExtension {
+        name: ash::khr::buffer_device_address::NAME,
+        flag: vma::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS,
+    },
+    VmaExtension {
+        name: ash::amd::device_coherent_memory::NAME,
+        flag: vma::AllocatorCreateFlags::AMD_DEVICE_COHERENT_MEMORY,
+    },
+];

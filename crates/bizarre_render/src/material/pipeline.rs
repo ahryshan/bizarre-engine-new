@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     device::VulkanDevice,
-    render_pass::{RenderPass, RenderPassHandle},
+    render_pass::{RenderPassHandle, VulkanRenderPass},
     shader::{load_shader, ShaderError, ShaderKind},
 };
 
@@ -39,28 +39,28 @@ pub struct ShaderStageDefinition {
 #[derive(Debug, Clone)]
 pub struct VulkanPipelineRequirements<'a> {
     pub features: VulkanPipelineFeatures,
-    pub material_type: MaterialType,
     pub bindings: &'a [MaterialBinding],
     pub stage_definitions: &'a [ShaderStageDefinition],
-    pub render_pass: RenderPass,
+    pub render_pass: RenderPassHandle,
+    pub subpass: u32,
     pub attachment_count: usize,
     pub base_pipeline: Option<&'a VulkanPipeline>,
-    pub vertex_bindings: Box<[vk::VertexInputBindingDescription]>,
-    pub vertex_attributes: Box<[vk::VertexInputAttributeDescription]>,
+    pub vertex_bindings: &'a [vk::VertexInputBindingDescription],
+    pub vertex_attributes: &'a [vk::VertexInputAttributeDescription],
 }
 
 #[derive(Debug)]
 pub struct VulkanPipeline {
     pub handle: vk::Pipeline,
     pub layout: vk::PipelineLayout,
-    pub set_layouts: Box<[vk::DescriptorSetLayout]>,
+    pub set_layouts: Vec<vk::DescriptorSetLayout>,
 }
 
 impl VulkanPipeline {
     pub fn from_requirements(
         requirements: &VulkanPipelineRequirements,
         base_pipeline: Option<vk::Pipeline>,
-        render_pass: vk::RenderPass,
+        render_pass: &VulkanRenderPass,
         device: &VulkanDevice,
     ) -> PipelineResult<Self> {
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
@@ -68,8 +68,8 @@ impl VulkanPipeline {
         let dynamic_state_info =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        let vertex_binding_descriptions = requirements.vertex_bindings.as_slice();
-        let vertex_input_attributes = requirements.vertex_attributes.as_slice();
+        let vertex_binding_descriptions = requirements.vertex_bindings;
+        let vertex_input_attributes = requirements.vertex_attributes;
 
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(vertex_binding_descriptions)
@@ -97,7 +97,7 @@ impl VulkanPipeline {
 
         let multisampling_info = vk::PipelineMultisampleStateCreateInfo::default()
             .sample_shading_enable(false)
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+            .rasterization_samples(render_pass.samples);
 
         let color_blend_attachments = {
             let mut attachments = Vec::with_capacity(requirements.attachment_count);
@@ -229,8 +229,14 @@ impl VulkanPipeline {
             .color_blend_state(&color_blend_info)
             .dynamic_state(&dynamic_state_info)
             .layout(layout)
-            .render_pass(render_pass)
-            .subpass(requirements.material_type as u32);
+            .render_pass(render_pass.render_pass)
+            .subpass(requirements.subpass);
+
+        let pipeline_create_info = if let Some(pipeline) = base_pipeline {
+            pipeline_create_info.base_pipeline_handle(pipeline)
+        } else {
+            pipeline_create_info
+        };
 
         let pipeline = unsafe {
             device
@@ -247,7 +253,7 @@ impl VulkanPipeline {
         Ok(VulkanPipeline {
             handle: pipeline[0],
             layout,
-            set_layouts: set_layouts.into_boxed_slice(),
+            set_layouts,
         })
     }
 

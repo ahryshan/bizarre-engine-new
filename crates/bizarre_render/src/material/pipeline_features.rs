@@ -89,9 +89,9 @@ impl From<vk::PrimitiveTopology> for PrimitiveTopology {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum PolygonMode {
     #[default]
-    Fill = 0,
-    Line = 1,
-    Point = 2,
+    Fill = vk::PolygonMode::FILL.as_raw(),
+    Line = vk::PolygonMode::LINE.as_raw(),
+    Point = vk::PolygonMode::POINT.as_raw(),
 }
 
 impl From<PolygonMode> for vk::PolygonMode {

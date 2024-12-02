@@ -5,7 +5,7 @@ use std::{
 
 use bizarre_core::Handle;
 
-use crate::present_target::{PresentTarget, PresentTargetData};
+use crate::present_target::{PresentTarget, PresentTargetHandle};
 
 pub struct RenderResourceManager<T> {
     pub(crate) resources: HashMap<Handle<T>, T>,

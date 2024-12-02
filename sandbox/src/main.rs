@@ -11,12 +11,13 @@ use bizarre_engine::render::material::pipeline::{
     PipelineHandle, ShaderStageDefinition, VulkanPipelineRequirements,
 };
 use bizarre_engine::render::material::pipeline_features::{
-    CullMode, PipelineFeatureFlags, VulkanPipelineFeatures,
+    CullMode, PipelineFeatureFlags, PolygonMode, VulkanPipelineFeatures,
 };
-use bizarre_engine::render::render_pass::{basic_render_pass, RenderPass, RenderPassHandle};
+use bizarre_engine::render::render_pass::{deferred_render_pass, RenderPassHandle};
 use bizarre_engine::render::render_target::RenderTargetHandle;
 use bizarre_engine::render::shader::ShaderKind;
 use bizarre_engine::render::submitter::RenderPackage;
+use bizarre_engine::render::vertex::Vertex;
 use bizarre_engine::window::window_events::WindowEvent;
 use bizarre_engine::{
     app::AppBuilder,
@@ -27,7 +28,7 @@ use bizarre_engine::{
     },
     ecs_modules::{InputModule, WindowModule},
     prelude::{Res, ResMut},
-    render::{present_target::PresentTarget, renderer::VulkanRenderer},
+    render::{present_target::PresentTargetHandle, renderer::VulkanRenderer},
     window::{window_manager::WindowManager, WindowCreateInfo},
 };
 
@@ -36,10 +37,13 @@ use nalgebra_glm::UVec2;
 struct RenderModule;
 
 #[derive(Resource)]
-struct MainPresentTarget(pub PresentTarget);
+struct MainPresentTarget(pub PresentTargetHandle);
 
 #[derive(Resource)]
 struct MainRenderTarget(pub RenderTargetHandle);
+
+#[derive(Resource)]
+struct DeferredRenderPass(pub RenderPassHandle);
 
 impl EcsModule for RenderModule {
     fn apply(self, world: &mut bizarre_engine::ecs::world::World) {
@@ -50,12 +54,29 @@ impl EcsModule for RenderModule {
             .get_main_window()
             .unwrap();
 
-        let (render_target, present_target) = renderer
-            .add_window(&main_window, RenderPass::Basic)
+        let present_target = renderer.create_present_target(&main_window).unwrap();
+
+        let deferred_render_pass = renderer
+            .create_render_pass_with(deferred_render_pass)
             .unwrap();
+
+        let render_target = {
+            let image_count = renderer
+                .present_target(&present_target)
+                .unwrap()
+                .image_count();
+            renderer
+                .create_swapchain_render_target(
+                    main_window.size(),
+                    deferred_render_pass,
+                    image_count,
+                )
+                .unwrap()
+        };
 
         world.insert_resource(MainPresentTarget(present_target));
         world.insert_resource(MainRenderTarget(render_target));
+        world.insert_resource(DeferredRenderPass(deferred_render_pass));
         world.insert_resource(renderer);
 
         world.add_systems(Schedule::Update, render);
@@ -66,19 +87,22 @@ fn render(
     mut renderer: ResMut<VulkanRenderer>,
     present_target: Res<MainPresentTarget>,
     render_target: Res<MainRenderTarget>,
+    render_pass: Res<DeferredRenderPass>,
     mut pipeline: Local<Option<PipelineHandle>>,
     window_events: Events<WindowEvent>,
 ) {
     if let Some(window_events) = window_events.as_ref() {
         for event in window_events.iter() {
             if let WindowEvent::Resize { handle, size } = event {
-                let present_target = PresentTarget::from_raw(handle.as_raw());
+                let present_target = PresentTargetHandle::from_raw(handle.as_raw());
                 renderer
                     .resize_present_target(present_target, *size)
                     .unwrap();
             }
         }
     }
+
+    let render_pass = render_pass.0;
 
     let pipeline = pipeline
         .get_or_insert_with(|| {
@@ -94,24 +118,33 @@ fn render(
             ];
 
             let requirements = VulkanPipelineRequirements {
-                features: VulkanPipelineFeatures::default(),
-                material_type: MaterialType::Opaque,
+                features: VulkanPipelineFeatures {
+                    ..Default::default()
+                },
                 bindings: &[],
                 stage_definitions: &stage_definitions,
-                render_pass: RenderPass::Basic,
-                attachment_count: 1,
+                render_pass,
+                subpass: 0,
+                attachment_count: 2,
                 base_pipeline: None,
-                vertex_bindings: Box::new([]),
-                vertex_attributes: Box::new([]),
+                vertex_bindings: Vertex::bindings(),
+                vertex_attributes: Vertex::attributes(),
             };
-            renderer.new_pipeline(&requirements).unwrap()
+            renderer.create_pipeline(&requirements).unwrap()
         })
         .to_owned();
 
-    let render_package = RenderPackage { pipeline };
+    let render_package = RenderPackage {
+        pipeline,
+        render_pass,
+    };
 
-    renderer.render(render_target.0, render_package).unwrap();
-    renderer.present(present_target.0, render_target.0).unwrap();
+    renderer
+        .render_to_target(render_target.0, render_package)
+        .unwrap();
+    renderer
+        .present_to_target(present_target.0, render_target.0)
+        .unwrap();
 }
 
 fn main() -> Result<()> {

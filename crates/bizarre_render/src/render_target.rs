@@ -2,14 +2,18 @@ use ash::vk;
 use bizarre_core::Handle;
 use nalgebra_glm::UVec2;
 
-use crate::{device::VulkanDevice, image::VulkanImage, render_pass::RenderPass};
+use crate::{
+    device::VulkanDevice,
+    image::AttachmentImage,
+    render_pass::{RenderPassAttachment, RenderPassHandle, VulkanRenderPass},
+};
 
 pub type RenderTargetHandle = Handle<ImageRenderTarget>;
 
 pub trait RenderTarget {
-    fn render_pass(&self) -> RenderPass;
+    fn render_pass(&self) -> vk::RenderPass;
     fn get_render_data(&self) -> RenderData;
-    fn image(&self) -> &VulkanImage;
+    fn output_image(&self) -> &AttachmentImage;
     fn render_complete_semaphore(&self) -> vk::Semaphore;
     fn next_frame(&mut self);
 
@@ -35,12 +39,11 @@ impl SwapchainRenderTarget {
         device: &VulkanDevice,
         extent: UVec2,
         cmd_pool: vk::CommandPool,
-        vk_render_pass: vk::RenderPass,
-        render_pass: RenderPass,
+        render_pass: &VulkanRenderPass,
         image_count: u32,
     ) -> Result<Self, vk::Result> {
         let targets = (0..image_count)
-            .map(|_| ImageRenderTarget::new(device, extent, cmd_pool, render_pass, vk_render_pass))
+            .map(|_| ImageRenderTarget::new(device, extent, cmd_pool, render_pass))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
@@ -51,7 +54,7 @@ impl SwapchainRenderTarget {
 }
 
 impl RenderTarget for SwapchainRenderTarget {
-    fn render_pass(&self) -> RenderPass {
+    fn render_pass(&self) -> vk::RenderPass {
         self.targets[0].render_pass
     }
 
@@ -62,9 +65,12 @@ impl RenderTarget for SwapchainRenderTarget {
             render_complete: render_ready,
             extent,
             framebuffer,
-            image,
+            images,
+            output_image_index,
             ..
         } = &self.targets[self.curr_image_index];
+
+        let image = images[*output_image_index].image;
 
         RenderData {
             in_flight_fence: *in_flight_fence,
@@ -75,12 +81,13 @@ impl RenderTarget for SwapchainRenderTarget {
                 height: extent.y,
             },
             framebuffer: *framebuffer,
-            image: image.image,
+            image,
         }
     }
 
-    fn image(&self) -> &VulkanImage {
-        &self.targets[self.curr_image_index].image
+    fn output_image(&self) -> &AttachmentImage {
+        let target = &self.targets[self.curr_image_index];
+        &target.images[target.output_image_index]
     }
 
     fn render_complete_semaphore(&self) -> vk::Semaphore {
@@ -103,19 +110,19 @@ pub struct ImageRenderTarget {
     pub cmd_buffer: vk::CommandBuffer,
     pub in_flight_fence: vk::Fence,
     pub render_complete: vk::Semaphore,
-    pub image: VulkanImage,
+    pub images: Vec<AttachmentImage>,
     pub extent: UVec2,
     pub framebuffer: vk::Framebuffer,
-    pub render_pass: RenderPass,
+    pub render_pass: vk::RenderPass,
+    pub output_image_index: usize,
 }
 
 impl ImageRenderTarget {
     pub fn new(
         device: &VulkanDevice,
-        extent: UVec2,
+        size: UVec2,
         cmd_pool: vk::CommandPool,
-        render_pass: RenderPass,
-        vk_render_pass: vk::RenderPass,
+        render_pass: &VulkanRenderPass,
     ) -> Result<Self, vk::Result> {
         let in_flight_fence = unsafe {
             let create_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
@@ -137,7 +144,43 @@ impl ImageRenderTarget {
             }
         };
 
-        let image = VulkanImage::new(device, extent)?;
+        let images = render_pass
+            .attachments
+            .iter()
+            .map(|attachment| {
+                let (format, usage, aspect_mask, samples) = match attachment {
+                    RenderPassAttachment::Resolve => (
+                        vk::Format::R8G8B8A8_SRGB,
+                        vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                        vk::ImageAspectFlags::COLOR,
+                        vk::SampleCountFlags::TYPE_1,
+                    ),
+                    RenderPassAttachment::Output(samples) => (
+                        vk::Format::R8G8B8A8_SRGB,
+                        vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+                        vk::ImageAspectFlags::COLOR,
+                        *samples,
+                    ),
+                    RenderPassAttachment::Color(samples) => (
+                        vk::Format::R8G8B8A8_SRGB,
+                        vk::ImageUsageFlags::COLOR_ATTACHMENT
+                            | vk::ImageUsageFlags::INPUT_ATTACHMENT
+                            | vk::ImageUsageFlags::SAMPLED,
+                        vk::ImageAspectFlags::COLOR,
+                        *samples,
+                    ),
+                    RenderPassAttachment::DepthStencil(samples) => (
+                        vk::Format::D32_SFLOAT,
+                        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                            | vk::ImageUsageFlags::INPUT_ATTACHMENT
+                            | vk::ImageUsageFlags::SAMPLED,
+                        vk::ImageAspectFlags::DEPTH,
+                        *samples,
+                    ),
+                };
+                AttachmentImage::new(device, size, format, usage, aspect_mask, samples)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let render_ready = {
             let create_info = vk::SemaphoreCreateInfo::default();
@@ -145,33 +188,59 @@ impl ImageRenderTarget {
         };
 
         let framebuffer = {
-            let attachments = [image.image_view];
+            let attachments = images
+                .iter()
+                .map(|image| image.image_view)
+                .collect::<Vec<_>>();
 
             let create_info = vk::FramebufferCreateInfo::default()
                 .attachments(&attachments)
-                .render_pass(vk_render_pass)
-                .width(extent.x)
-                .height(extent.y)
+                .render_pass(render_pass.render_pass)
+                .width(size.x)
+                .height(size.y)
                 .layers(1);
 
             unsafe { device.create_framebuffer(&create_info, None)? }
         };
 
+        let output_image_index = if render_pass.msaa() {
+            render_pass
+                .attachments
+                .iter()
+                .position(|element| match element {
+                    RenderPassAttachment::Resolve => true,
+                    _ => false,
+                })
+                .unwrap()
+        } else {
+            render_pass
+                .attachments
+                .iter()
+                .position(|element| match element {
+                    RenderPassAttachment::Output(..) => true,
+                    _ => false,
+                })
+                .unwrap()
+        };
+
         Ok(Self {
             cmd_buffer,
             in_flight_fence,
-            image,
-            extent,
+            images,
+            extent: size,
             render_complete: render_ready,
             framebuffer,
-            render_pass,
+            render_pass: render_pass.render_pass,
+            output_image_index,
         })
     }
 
     pub fn destroy(&mut self, device: &VulkanDevice) {
         unsafe {
             device.destroy_framebuffer(self.framebuffer, None);
-            self.image.destroy(device);
+            self.images
+                .drain(..)
+                .for_each(|mut image| image.destroy(device));
             device.destroy_semaphore(self.render_complete, None);
             device.destroy_fence(self.in_flight_fence, None);
         }

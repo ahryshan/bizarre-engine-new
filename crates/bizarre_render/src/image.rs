@@ -3,27 +3,34 @@ use nalgebra_glm::UVec2;
 
 use crate::device::VulkanDevice;
 
-pub struct VulkanImage {
+pub struct AttachmentImage {
     pub image: vk::Image,
     pub image_view: vk::ImageView,
     pub memory: vk::DeviceMemory,
     pub size: UVec2,
 }
 
-impl VulkanImage {
-    pub fn new(device: &VulkanDevice, size: UVec2) -> Result<VulkanImage, vk::Result> {
+impl AttachmentImage {
+    pub fn new(
+        device: &VulkanDevice,
+        size: UVec2,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        aspect_mask: vk::ImageAspectFlags,
+        samples: vk::SampleCountFlags,
+    ) -> Result<AttachmentImage, vk::Result> {
         let image = {
             let create_info = vk::ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_2D)
-                .samples(vk::SampleCountFlags::TYPE_1)
+                .samples(samples)
                 .extent(vk::Extent3D {
                     width: size.x,
                     height: size.y,
                     depth: 1,
                 })
-                .format(vk::Format::R8G8B8A8_SRGB)
+                .format(format)
                 .initial_layout(vk::ImageLayout::UNDEFINED)
-                .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+                .usage(usage)
                 .mip_levels(1)
                 .array_layers(1);
 
@@ -59,11 +66,11 @@ impl VulkanImage {
                     b: vk::ComponentSwizzle::IDENTITY,
                     a: vk::ComponentSwizzle::IDENTITY,
                 })
-                .format(vk::Format::R8G8B8A8_SRGB)
+                .format(format)
                 .image(image)
                 .view_type(vk::ImageViewType::TYPE_2D)
                 .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    aspect_mask,
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: 0,
