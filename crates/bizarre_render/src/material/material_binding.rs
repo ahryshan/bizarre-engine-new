@@ -46,6 +46,23 @@ impl From<&MaterialBinding> for BindObject {
     }
 }
 
+impl From<&BindObject> for BindingType {
+    fn from(value: &BindObject) -> Self {
+        match value {
+            BindObject::UniformBuffer(..) => BindingType::UniformBuffer,
+            BindObject::InputAttachment(..) => BindingType::InputAttachment,
+            BindObject::StorageBuffer(..) => BindingType::StorageBuffer,
+            BindObject::Texture(..) => BindingType::Texture,
+        }
+    }
+}
+
+impl From<&mut BindObject> for BindingType {
+    fn from(value: &mut BindObject) -> Self {
+        (value as &BindObject).into()
+    }
+}
+
 impl From<&BindObject> for vk::DescriptorType {
     fn from(value: &BindObject) -> Self {
         match value {

@@ -51,7 +51,7 @@ pub struct VulkanPipelineRequirements<'a> {
 
 #[derive(Debug)]
 pub struct VulkanPipeline {
-    pub handle: vk::Pipeline,
+    pub pipeline: vk::Pipeline,
     pub layout: vk::PipelineLayout,
     pub set_layouts: Vec<vk::DescriptorSetLayout>,
 }
@@ -251,7 +251,7 @@ impl VulkanPipeline {
         }
 
         Ok(VulkanPipeline {
-            handle: pipeline[0],
+            pipeline: pipeline[0],
             layout,
             set_layouts,
         })
@@ -267,8 +267,8 @@ impl VulkanPipeline {
                 *layout = vk::DescriptorSetLayout::null();
             }
 
-            device.destroy_pipeline(self.handle, None);
-            self.handle = vk::Pipeline::null();
+            device.destroy_pipeline(self.pipeline, None);
+            self.pipeline = vk::Pipeline::null();
         }
     }
 }

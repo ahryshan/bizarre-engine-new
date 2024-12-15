@@ -134,10 +134,7 @@ fn render(
         })
         .to_owned();
 
-    let render_package = RenderPackage {
-        pipeline,
-        render_pass,
-    };
+    let render_package = RenderPackage {};
 
     renderer
         .render_to_target(render_target.0, render_package)

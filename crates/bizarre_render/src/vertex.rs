@@ -4,8 +4,9 @@ use ash::vk;
 use nalgebra_glm::Vec3;
 
 #[repr(C)]
+#[derive(Clone, Debug, Default)]
 pub struct Vertex {
-    position: Vec3,
+    pub position: Vec3,
 }
 
 impl Vertex {
@@ -23,7 +24,7 @@ impl Vertex {
             binding: 0,
             location: 0,
             format: vk::Format::R32G32B32_SFLOAT,
-            offset: offset_of!(Vertex, position),
+            offset: offset_of!(Vertex, position) as u32,
             ..Default::default()
         }]
     }

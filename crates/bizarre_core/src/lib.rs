@@ -1,9 +1,7 @@
 #![feature(const_trait_impl)]
-#![feature(effects)]
-
-mod handle;
 
 pub mod builder;
+pub mod handle;
 pub mod utils;
 
-pub use handle::Handle;
+pub use handle::{Handle, IntoHandleRawValue};

@@ -1,6 +1,15 @@
-use std::{fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+};
 
-pub struct Handle<T> {
+pub struct Handle<T: ?Sized> {
     handle: usize,
     _marker: PhantomData<T>,
 }
@@ -112,3 +121,132 @@ impl<T> Clone for Handle<T> {
 }
 
 impl<T> Copy for Handle<T> {}
+
+pub enum HandlePlacement {
+    Present,
+    NotPresent,
+    Deleted,
+    OutOfBounds,
+}
+
+pub trait HandleStrategy<T> {
+    fn new_handle(&mut self, object: &T) -> Handle<T>;
+    fn mark_deleted(&mut self, handle: Handle<T>);
+    fn handle_placement(&self, handle: &Handle<T>) -> HandlePlacement;
+}
+
+pub trait IntoHandle {
+    fn into_handle(&self) -> Handle<Self>;
+}
+
+pub struct SparseHandleStrategy<T> {
+    created: BTreeSet<Handle<T>>,
+    deleted: BTreeSet<Handle<T>>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> Default for SparseHandleStrategy<T> {
+    fn default() -> Self {
+        Self {
+            created: Default::default(),
+            deleted: Default::default(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> SparseHandleStrategy<T> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
+impl<T: IntoHandle> HandleStrategy<T> for SparseHandleStrategy<T> {
+    fn new_handle(&mut self, object: &T) -> Handle<T> {
+        let handle = object.into_handle();
+
+        if self.deleted.contains(&handle) {
+            self.deleted.remove(&handle);
+        }
+
+        self.created.insert(handle);
+        handle
+    }
+
+    fn mark_deleted(&mut self, handle: Handle<T>) {
+        self.created.remove(&handle);
+        self.deleted.insert(handle);
+    }
+
+    fn handle_placement(&self, handle: &Handle<T>) -> HandlePlacement {
+        if self.deleted.contains(&handle) {
+            HandlePlacement::Deleted
+        } else if self.created.contains(&handle) {
+            HandlePlacement::Present
+        } else {
+            HandlePlacement::NotPresent
+        }
+    }
+}
+
+pub struct DenseHandleStrategy<T> {
+    next_id: AtomicUsize,
+    id_dumpster: Arc<Mutex<VecDeque<Handle<T>>>>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> DenseHandleStrategy<T> {
+    pub fn new() -> Self {
+        Self {
+            next_id: AtomicUsize::new(1),
+            id_dumpster: Arc::new(Mutex::new(VecDeque::new())),
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<T> Default for DenseHandleStrategy<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> HandleStrategy<T> for DenseHandleStrategy<T> {
+    fn new_handle(&mut self, _: &T) -> Handle<T> {
+        let mut dumpster = self
+            .id_dumpster
+            .lock()
+            .expect("Could not lock recycled ids for addition");
+
+        if dumpster.is_empty() {
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            Handle::from_raw(id)
+        } else {
+            dumpster.pop_front().unwrap()
+        }
+    }
+
+    fn mark_deleted(&mut self, handle: Handle<T>) {
+        let mut a = self
+            .id_dumpster
+            .lock()
+            .expect("Could not lock recycled ids for addition");
+
+        a.push_back(handle)
+    }
+
+    fn handle_placement(&self, handle: &Handle<T>) -> HandlePlacement {
+        if handle.as_raw() == 0 || handle.as_raw() >= self.next_id.load(Ordering::SeqCst) {
+            HandlePlacement::OutOfBounds
+        } else if self
+            .id_dumpster
+            .lock()
+            .expect("Could not lock recycled handle ids")
+            .contains(handle)
+        {
+            HandlePlacement::Deleted
+        } else {
+            HandlePlacement::Present
+        }
+    }
+}

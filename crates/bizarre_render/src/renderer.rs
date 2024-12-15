@@ -178,123 +178,7 @@ impl VulkanRenderer {
         render_target: RenderTargetHandle,
         render_package: RenderPackage,
     ) -> RenderResult<()> {
-        let render_target = self.render_targets.get(&render_target).unwrap();
-
-        let RenderData {
-            in_flight_fence,
-            render_ready,
-            cmd_buffer,
-            framebuffer,
-            extent,
-            ..
-        } = render_target.get_render_data();
-
-        let fences = [in_flight_fence];
-        let cmd_buffer = cmd_buffer;
-        let render_pass = self.render_pass(&render_package.render_pass).unwrap();
-
-        unsafe {
-            self.device.wait_for_fences(&fences, true, u64::MAX)?;
-
-            let begin_info = vk::CommandBufferBeginInfo::default();
-            self.device.begin_command_buffer(cmd_buffer, &begin_info)?;
-
-            let clear_values = [
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.1, 0.2, 0.25, 1.0],
-                    },
-                },
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 0.0],
-                    },
-                },
-                vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: -1.0,
-                        stencil: 0,
-                    },
-                },
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [1.0, 0.0, 0.0, 0.0],
-                    },
-                },
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 0.0],
-                    },
-                },
-            ];
-
-            let render_pass_info = vk::RenderPassBeginInfo::default()
-                .clear_values(&clear_values)
-                .render_pass(render_pass.render_pass)
-                .framebuffer(framebuffer)
-                .render_area(vk::Rect2D {
-                    extent,
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                });
-
-            self.device.cmd_begin_render_pass(
-                cmd_buffer,
-                &render_pass_info,
-                vk::SubpassContents::INLINE,
-            );
-
-            let viewport = vk::Viewport::default()
-                .x(0.0)
-                .y(extent.height as f32)
-                .width(extent.width as f32)
-                .height(-(extent.height as f32))
-                .min_depth(0.0)
-                .max_depth(1.0);
-
-            self.device.cmd_set_viewport(cmd_buffer, 0, &[viewport]);
-
-            let scissor = vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent,
-            };
-
-            self.device.cmd_set_scissor(cmd_buffer, 0, &[scissor]);
-
-            let pipeline = self.pipelines.get(&render_package.pipeline).unwrap();
-
-            self.device.cmd_bind_pipeline(
-                cmd_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline.handle,
-            );
-
-            self.device
-                .cmd_next_subpass(cmd_buffer, vk::SubpassContents::INLINE);
-
-            if let Antialiasing::MSAA(..) = self.antialiasing {
-                self.device
-                    .cmd_next_subpass(cmd_buffer, vk::SubpassContents::INLINE);
-            }
-
-            self.device.cmd_end_render_pass(cmd_buffer);
-            self.device.end_command_buffer(cmd_buffer)?;
-
-            let submit_buffers = [cmd_buffer];
-            let submit_signal = [render_ready];
-
-            let submit_info = vk::SubmitInfo::default()
-                .command_buffers(&submit_buffers)
-                .signal_semaphores(&submit_signal);
-
-            let submits = [submit_info];
-
-            self.device.reset_fences(&[in_flight_fence])?;
-
-            self.device
-                .queue_submit(self.device.graphics_queue, &submits, in_flight_fence)?;
-        }
-
-        Ok(())
+        todo!()
     }
 
     pub fn present_to_target(
@@ -371,7 +255,7 @@ impl VulkanRenderer {
 
         let pipeline =
             VulkanPipeline::from_requirements(requirements, None, render_pass, &self.device)?;
-        let handle = PipelineHandle::from_raw(pipeline.handle.as_raw());
+        let handle = PipelineHandle::from_raw(pipeline.pipeline.as_raw());
         self.pipelines.insert(handle, pipeline);
         Ok(handle)
     }
