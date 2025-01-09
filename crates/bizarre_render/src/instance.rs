@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     debug_messenger::{populate_debug_messenger_create_info, DebugMessenger},
-    device::{DeviceResult, VulkanDevice},
+    device::{logical_device::DeviceResult, LogicalDevice},
 };
 
 #[derive(Error, Debug)]
@@ -68,8 +68,8 @@ impl VulkanInstance {
         }
     }
 
-    pub fn create_device_ext(&self) -> DeviceResult<VulkanDevice> {
-        VulkanDevice::new(self)
+    pub fn create_device_ext(&self) -> DeviceResult<LogicalDevice> {
+        LogicalDevice::new(self)
     }
 
     pub fn entry_ext(&self) -> &ash::Entry {

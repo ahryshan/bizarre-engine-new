@@ -3,7 +3,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use crate::material::material_instance::MaterialInstanceHandle;
+use crate::material::{material_instance::MaterialInstanceHandle, MaterialHandle};
 
 use super::{render_object::RenderObjectFlags, RenderObjectId};
 

@@ -3,23 +3,31 @@ use std::{
     ops::Deref,
 };
 
-use ash::vk::{self, PhysicalDeviceType};
+use ash::{
+    ext::memory_priority,
+    vk::{self, PhysicalDeviceType},
+};
 use bizarre_log::{core_info, core_trace};
 use thiserror::Error;
 
 use crate::{instance::VulkanInstance, present_target::SwapchainSupportInfo};
 
-const REQUIRED_EXTENSIONS: &'static [*const c_char] = &[ash::khr::swapchain::NAME.as_ptr()];
+use super::PhysicalDevice;
 
-pub struct VulkanDevice {
+const REQUIRED_EXTENSIONS: &'static [*const c_char] = &[
+    ash::khr::swapchain::NAME.as_ptr(),
+    ash::ext::descriptor_buffer::NAME.as_ptr(),
+];
+
+pub struct LogicalDevice {
     pub(crate) logical: ash::Device,
-    pub(crate) physical: vk::PhysicalDevice,
-    pub(crate) memory_properties: vk::PhysicalDeviceMemoryProperties,
+    pub(crate) physical: PhysicalDevice,
     pub(crate) queue_families: QueueFamilies,
     pub(crate) graphics_queue: vk::Queue,
     pub(crate) compute_queue: vk::Queue,
     pub(crate) present_queue: vk::Queue,
     pub(crate) cmd_pool: vk::CommandPool,
+    pub(crate) descriptor_pool: vk::DescriptorPool,
     pub(crate) allocator: vma::Allocator,
 }
 
@@ -37,12 +45,14 @@ pub enum DeviceError {
 
 pub type DeviceResult<T> = Result<T, DeviceError>;
 
-impl VulkanDevice {
+impl LogicalDevice {
     pub(crate) fn new(instance: &VulkanInstance) -> DeviceResult<Self> {
         let (physical, queue_families) =
             find_best_physical_device(instance).ok_or(DeviceError::NoSuitablePhysicalDevice)?;
 
-        let name = get_pdevice_name(instance, physical);
+        let physical = PhysicalDevice::new(instance, physical);
+
+        let name = get_pdevice_name(instance, *physical);
 
         core_info!("Picked physical device: {name}");
 
@@ -62,12 +72,24 @@ impl VulkanDevice {
         let mut sync2 =
             vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
 
+        let mut dynamic_rendering =
+            vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+
+        let mut buffer_device_address =
+            vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
+
+        let mut descriptor_buffer =
+            vk::PhysicalDeviceDescriptorBufferFeaturesEXT::default().descriptor_buffer(true);
+
         let create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&REQUIRED_EXTENSIONS)
-            .push_next(&mut sync2);
+            .push_next(&mut sync2)
+            .push_next(&mut dynamic_rendering)
+            .push_next(&mut buffer_device_address)
+            .push_next(&mut descriptor_buffer);
 
-        let logical = unsafe { instance.create_device(physical, &create_info, None)? };
+        let logical = unsafe { instance.create_device(*physical, &create_info, None)? };
 
         let graphics_queue = unsafe { logical.get_device_queue(queue_families.graphics, 0) };
         let compute_queue = unsafe { logical.get_device_queue(queue_families.compute, 0) };
@@ -81,27 +103,38 @@ impl VulkanDevice {
             unsafe { logical.create_command_pool(&create_info, None)? }
         };
 
-        let memory_properties =
-            { unsafe { instance.get_physical_device_memory_properties(physical) } };
-
         let allocator = {
-            let create_flags = unsafe { instance.enumerate_device_extension_properties(physical) }?
-                .into_iter()
-                .filter_map(|ext| {
-                    VMA_OPT_EXTENSIONS.into_iter().find_map(|vma_ext| {
-                        if vma_ext.name == ext.extension_name_as_c_str().ok()? {
-                            Some(vma::AllocatorCreateFlags::from_bits(vma_ext.flag.bits())?)
-                        } else {
-                            None
-                        }
+            let create_flags =
+                unsafe { instance.enumerate_device_extension_properties(*physical) }?
+                    .into_iter()
+                    .filter_map(|ext| {
+                        VMA_OPT_EXTENSIONS.into_iter().find_map(|vma_ext| {
+                            if vma_ext.name == ext.extension_name_as_c_str().ok()? {
+                                Some(vma::AllocatorCreateFlags::from_bits(vma_ext.flag.bits())?)
+                            } else {
+                                None
+                            }
+                        })
                     })
-                })
-                .fold(vma::AllocatorCreateFlags::empty(), |acc, curr| acc | curr);
+                    .fold(vma::AllocatorCreateFlags::empty(), |acc, curr| acc | curr);
 
-            let mut create_info = vma::AllocatorCreateInfo::new(&instance, &logical, physical);
+            let mut create_info = vma::AllocatorCreateInfo::new(&instance, &logical, *physical);
             create_info.flags = create_flags;
 
             unsafe { vma::Allocator::new(create_info) }?
+        };
+
+        let descriptor_pool = unsafe {
+            let pool_sizes = [vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::INPUT_ATTACHMENT,
+                descriptor_count: 32,
+            }];
+
+            let create_info = vk::DescriptorPoolCreateInfo::default()
+                .max_sets(256)
+                .pool_sizes(&pool_sizes);
+
+            logical.create_descriptor_pool(&create_info, None)?
         };
 
         Ok(Self {
@@ -112,39 +145,30 @@ impl VulkanDevice {
             compute_queue,
             present_queue,
             cmd_pool,
-            memory_properties,
+            descriptor_pool,
             allocator,
         })
     }
 
-    pub fn find_memory_type(
-        &self,
-        type_filter: u32,
-        properties: vk::MemoryPropertyFlags,
-    ) -> DeviceResult<u32> {
-        let iter = self.memory_properties.memory_types.into_iter().enumerate();
-
-        for (i, mem_type) in iter {
-            if type_filter & (1 << i) != 0 && mem_type.property_flags & properties == properties {
-                return Ok(i as u32);
-            }
-        }
-
-        Err(DeviceError::NoSuitableMemory)
+    pub(crate) fn get_buffer_address(&self, buffer: vk::Buffer) -> vk::DeviceAddress {
+        let addr_info = vk::BufferDeviceAddressInfo::default().buffer(buffer);
+        unsafe { self.get_buffer_device_address(&addr_info) }
     }
 }
 
-impl Drop for VulkanDevice {
+impl Drop for LogicalDevice {
     fn drop(&mut self) {
         unsafe {
             self.device_wait_idle();
             self.logical.destroy_command_pool(self.cmd_pool, None);
+            self.logical
+                .destroy_descriptor_pool(self.descriptor_pool, None);
             self.logical.destroy_device(None);
         }
     }
 }
 
-impl Deref for VulkanDevice {
+impl Deref for LogicalDevice {
     type Target = ash::Device;
 
     fn deref(&self) -> &Self::Target {

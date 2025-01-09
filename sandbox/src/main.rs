@@ -1,38 +1,26 @@
-use std::time::{Duration, Instant};
-
 use anyhow::Result;
 
-use bizarre_engine::event::Events;
-use bizarre_engine::log::trace;
-use bizarre_engine::prelude::*;
-
-use bizarre_engine::render::material::material_binding::MaterialType;
-use bizarre_engine::render::material::pipeline::{
-    PipelineHandle, ShaderStageDefinition, VulkanPipelineRequirements,
-};
-use bizarre_engine::render::material::pipeline_features::{
-    CullMode, PipelineFeatureFlags, PolygonMode, VulkanPipelineFeatures,
-};
-use bizarre_engine::render::render_pass::{deferred_render_pass, RenderPassHandle};
-use bizarre_engine::render::render_target::RenderTargetHandle;
-use bizarre_engine::render::shader::ShaderKind;
-use bizarre_engine::render::submitter::RenderPackage;
-use bizarre_engine::render::vertex::Vertex;
-use bizarre_engine::window::window_events::WindowEvent;
 use bizarre_engine::{
     app::AppBuilder,
-    ecs::{
-        commands::{Command, Commands},
-        system::schedule::Schedule,
-        world::ecs_module::EcsModule,
-    },
+    ecs::{system::schedule::Schedule, world::ecs_module::EcsModule},
     ecs_modules::{InputModule, WindowModule},
-    prelude::{Res, ResMut},
-    render::{present_target::PresentTargetHandle, renderer::VulkanRenderer},
-    window::{window_manager::WindowManager, WindowCreateInfo},
+    event::Events,
+    prelude::{Res, ResMut, *},
+    render::{
+        material::builtin::basic_deferred,
+        present_target::PresentTargetHandle,
+        render_target::RenderTargetHandle,
+        renderer::VulkanRenderer,
+        scene::{
+            render_object::{RenderObject, RenderObjectFlags, RenderObjectMaterials},
+            InstanceData, SceneHandle, SceneUniform,
+        },
+        submitter::RenderPackage,
+    },
+    window::{window_events::WindowEvent, window_manager::WindowManager, WindowCreateInfo},
 };
 
-use nalgebra_glm::UVec2;
+use nalgebra_glm::{look_at, perspective_fov, radians, Mat4, UVec2, Vec1, Vec3};
 
 struct RenderModule;
 
@@ -41,9 +29,6 @@ struct MainPresentTarget(pub PresentTargetHandle);
 
 #[derive(Resource)]
 struct MainRenderTarget(pub RenderTargetHandle);
-
-#[derive(Resource)]
-struct DeferredRenderPass(pub RenderPassHandle);
 
 impl EcsModule for RenderModule {
     fn apply(self, world: &mut bizarre_engine::ecs::world::World) {
@@ -54,29 +39,57 @@ impl EcsModule for RenderModule {
             .get_main_window()
             .unwrap();
 
-        let present_target = renderer.create_present_target(&main_window).unwrap();
+        let present_target_handle = renderer.create_present_target(&main_window).unwrap();
 
-        let deferred_render_pass = renderer
-            .create_render_pass_with(deferred_render_pass)
-            .unwrap();
+        let (image_count, width, height) = {
+            let present_target = renderer.present_target(&present_target_handle).unwrap();
+            let size = present_target.size();
 
-        let render_target = {
-            let image_count = renderer
-                .present_target(&present_target)
-                .unwrap()
-                .image_count();
-            renderer
-                .create_swapchain_render_target(
-                    main_window.size(),
-                    deferred_render_pass,
-                    image_count,
-                )
-                .unwrap()
+            (present_target.image_count(), size.x, size.y)
         };
 
-        world.insert_resource(MainPresentTarget(present_target));
+        let render_target = renderer
+            .create_swapchain_render_target(main_window.size(), image_count)
+            .unwrap();
+
+        let scene = renderer.create_scene(image_count as usize).unwrap();
+
+        let mesh = renderer.load_mesh("assets/meshes/cube.obj").unwrap();
+
+        let material = renderer.insert_material(basic_deferred());
+        let material_instance = renderer.create_material_instance(material).unwrap();
+
+        let render_object = RenderObject {
+            flags: RenderObjectFlags::empty(),
+            materials: RenderObjectMaterials::new(material_instance),
+            mesh,
+            instance_data: InstanceData {
+                transform: Mat4::identity(),
+            },
+        };
+
+        renderer.with_scene_mut(&scene, |scene| {
+            let _ = scene.add_object(render_object);
+
+            let view = look_at(
+                &Vec3::new(0.0, 2.0, 5.0),
+                &Vec3::zeros(),
+                &Vec3::new(0.0, 1.0, 0.0),
+            );
+
+            let projection = perspective_fov(
+                radians(&Vec1::new(90.0)).x,
+                width as f32,
+                height as f32,
+                0.001,
+                1000.0,
+            );
+
+            scene.update_scene_uniform(SceneUniform { view, projection })
+        });
+
+        world.insert_resource(MainPresentTarget(present_target_handle));
         world.insert_resource(MainRenderTarget(render_target));
-        world.insert_resource(DeferredRenderPass(deferred_render_pass));
         world.insert_resource(renderer);
 
         world.add_systems(Schedule::Update, render);
@@ -87,8 +100,6 @@ fn render(
     mut renderer: ResMut<VulkanRenderer>,
     present_target: Res<MainPresentTarget>,
     render_target: Res<MainRenderTarget>,
-    render_pass: Res<DeferredRenderPass>,
-    mut pipeline: Local<Option<PipelineHandle>>,
     window_events: Events<WindowEvent>,
 ) {
     if let Some(window_events) = window_events.as_ref() {
@@ -102,39 +113,10 @@ fn render(
         }
     }
 
-    let render_pass = render_pass.0;
-
-    let pipeline = pipeline
-        .get_or_insert_with(|| {
-            let stage_definitions = [
-                ShaderStageDefinition {
-                    path: "assets/shaders/basic.vert".into(),
-                    stage: ShaderKind::Vertex,
-                },
-                ShaderStageDefinition {
-                    path: "assets/shaders/basic.frag".into(),
-                    stage: ShaderKind::Fragment,
-                },
-            ];
-
-            let requirements = VulkanPipelineRequirements {
-                features: VulkanPipelineFeatures {
-                    ..Default::default()
-                },
-                bindings: &[],
-                stage_definitions: &stage_definitions,
-                render_pass,
-                subpass: 0,
-                attachment_count: 2,
-                base_pipeline: None,
-                vertex_bindings: Vertex::bindings(),
-                vertex_attributes: Vertex::attributes(),
-            };
-            renderer.create_pipeline(&requirements).unwrap()
-        })
-        .to_owned();
-
-    let render_package = RenderPackage {};
+    let render_package = RenderPackage {
+        pov: Mat4::default(),
+        scene: SceneHandle::from_raw(0usize),
+    };
 
     renderer
         .render_to_target(render_target.0, render_package)

@@ -1,11 +1,13 @@
 use ash::vk;
 use bizarre_core::Handle;
-use material_binding::{BindObject, BindObjectSet, BindingSet, BindingType};
+use material_binding::{BindObject, BindObjectSet, BindingSet, BindingType, MaterialBinding};
 use pipeline::VulkanPipeline;
 use thiserror::Error;
 
-use crate::device::VulkanDevice;
+use crate::device::LogicalDevice;
 
+pub mod builtin;
+pub mod descriptor_buffer;
 pub mod material_binding;
 pub mod material_instance;
 pub mod pipeline;
@@ -39,7 +41,9 @@ pub struct Material {
 pub struct MaterialCreateInfo {}
 
 impl Material {
-    pub fn new(pipeline: VulkanPipeline, bindings: BindingSet) -> Self {
+    pub fn new(pipeline: VulkanPipeline, bindings: &[MaterialBinding]) -> Self {
+        let bindings = BindingSet::from(bindings);
+
         Self { pipeline, bindings }
     }
 }

@@ -1,12 +1,20 @@
 #![feature(slice_pattern)]
 #![feature(variant_count)]
 
+use ash::vk;
+
 extern crate vk_mem as vma;
+
+pub const COLOR_FORMAT: vk::Format = vk::Format::R32G32B32A32_SFLOAT;
+pub const DEPTH_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
+pub const OUTPUT_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
+pub const TMP_SAMPLES: vk::SampleCountFlags = vk::SampleCountFlags::TYPE_1;
 
 mod debug_messenger;
 mod device;
 mod image;
 mod instance;
+mod vulkan_context;
 
 pub mod antialiasing;
 pub mod asset_manager;

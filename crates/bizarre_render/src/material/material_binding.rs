@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use ash::vk;
 
-use crate::{device::VulkanDevice, shader::ShaderKind};
+use crate::{device::LogicalDevice, shader::ShaderKind};
 
 #[derive(Debug, Clone, Copy)]
 pub enum MaterialType {
@@ -91,6 +91,17 @@ impl DerefMut for BindObjectSet {
     }
 }
 
+impl From<&BindingSet> for BindObjectSet {
+    fn from(value: &BindingSet) -> Self {
+        let boxed = value
+            .iter()
+            .map(|material_binding| BindObject::from(material_binding))
+            .collect::<Box<_>>();
+
+        Self(boxed)
+    }
+}
+
 impl FromIterator<BindObject> for BindObjectSet {
     fn from_iter<T: IntoIterator<Item = BindObject>>(iter: T) -> Self {
         Self(iter.into_iter().collect::<Box<_>>())
@@ -108,6 +119,7 @@ pub enum MaterialBindingRate {
 pub struct MaterialBinding {
     pub binding: u32,
     pub set: u32,
+    pub descriptor_count: u32,
     pub shader_stage: ShaderKind,
     pub binding_type: BindingType,
 }
@@ -116,18 +128,24 @@ impl From<&MaterialBinding> for vk::DescriptorSetLayoutBinding<'_> {
     fn from(value: &MaterialBinding) -> Self {
         vk::DescriptorSetLayoutBinding::default()
             .binding(value.binding)
-            .descriptor_count(1)
+            .descriptor_count(value.descriptor_count)
             .stage_flags(value.shader_stage.into())
             .descriptor_type(value.binding_type.into())
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BindingSet(Box<[MaterialBinding]>);
 
 impl From<Vec<MaterialBinding>> for BindingSet {
     fn from(value: Vec<MaterialBinding>) -> Self {
         Self(value.into())
+    }
+}
+
+impl From<&[MaterialBinding]> for BindingSet {
+    fn from(value: &[MaterialBinding]) -> Self {
+        Self(value.to_vec().into_boxed_slice())
     }
 }
 
@@ -181,7 +199,7 @@ pub fn binding_sets(bindings: &[MaterialBinding]) -> Vec<BindingSet> {
 
 pub fn bindings_into_layouts(
     bindings: &[MaterialBinding],
-    device: &VulkanDevice,
+    device: &LogicalDevice,
 ) -> Result<Vec<vk::DescriptorSetLayout>, vk::Result> {
     if bindings.is_empty() {
         return Ok(vec![]);

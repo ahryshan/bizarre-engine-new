@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ash::vk;
 use bizarre_core::Handle;
 
-use crate::device::VulkanDevice;
+use crate::device::LogicalDevice;
 
 // TODO: make tools for generic render pass description
 
@@ -30,7 +30,7 @@ impl VulkanRenderPass {
 }
 
 pub fn deferred_render_pass(
-    device: &VulkanDevice,
+    device: &LogicalDevice,
     samples: vk::SampleCountFlags,
 ) -> Result<VulkanRenderPass, vk::Result> {
     let msaa = samples != vk::SampleCountFlags::TYPE_1;

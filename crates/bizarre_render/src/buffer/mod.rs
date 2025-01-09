@@ -7,7 +7,7 @@ use ash::vk;
 use thiserror::Error;
 use vma::Alloc;
 
-use crate::device::VulkanDevice;
+use crate::{device::LogicalDevice, vulkan_context::get_device};
 
 #[derive(Debug, Error)]
 pub enum BufferError {
@@ -29,9 +29,9 @@ pub enum BufferTransferError {
     },
     #[error("Transfer destination is too small, copy size: {src_size}, destination offset: {dst_offset}, available size after destination offset: {}", dst_size - dst_offset)]
     TransferDstTooSmall {
-        src_size: usize,
-        dst_offset: usize,
-        dst_size: usize,
+        src_size: vk::DeviceSize,
+        dst_offset: vk::DeviceSize,
+        dst_size: vk::DeviceSize,
     },
 }
 
@@ -40,16 +40,15 @@ pub type BufferResult<T> = Result<T, BufferError>;
 pub struct GpuBuffer {
     buffer: vk::Buffer,
     allocation: vma::Allocation,
-    size: usize,
+    size: vk::DeviceSize,
     buffer_usage: vk::BufferUsageFlags,
     mem_usage: vma::MemoryUsage,
     alloc_flags: vma::AllocationCreateFlags,
 }
 
 impl GpuBuffer {
-    pub fn staging_buffer(device: &VulkanDevice, size: usize) -> BufferResult<Self> {
+    pub fn staging_buffer(device: &LogicalDevice, size: vk::DeviceSize) -> BufferResult<Self> {
         Self::new(
-            device,
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vma::MemoryUsage::AutoPreferHost,
@@ -58,12 +57,12 @@ impl GpuBuffer {
     }
 
     pub fn new(
-        device: &VulkanDevice,
-        size: usize,
+        size: vk::DeviceSize,
         buffer_usage: vk::BufferUsageFlags,
         mem_usage: vma::MemoryUsage,
         alloc_flags: vma::AllocationCreateFlags,
     ) -> BufferResult<Self> {
+        let device = get_device();
         let (buffer, allocation) = {
             let buffer_info = vk::BufferCreateInfo::default()
                 .size(size as vk::DeviceSize)
@@ -90,7 +89,7 @@ impl GpuBuffer {
         })
     }
 
-    pub fn size(&self) -> usize {
+    pub fn size(&self) -> vk::DeviceSize {
         self.size
     }
 
@@ -114,9 +113,20 @@ impl GpuBuffer {
         &self.alloc_flags
     }
 
+    pub fn flush_range(
+        &self,
+        offset: vk::DeviceSize,
+        size: vk::DeviceSize,
+    ) -> Result<(), vk::Result> {
+        let device = get_device();
+        device
+            .allocator
+            .flush_allocation(&self.allocation, offset, size)
+    }
+
     pub fn copy_from_buffer_range<R: RangeBounds<u64>>(
         &mut self,
-        device: &VulkanDevice,
+        device: &LogicalDevice,
         src: &GpuBuffer,
         src_range: R,
         dst_offset: u64,
@@ -155,7 +165,7 @@ impl GpuBuffer {
 
     pub fn copy_from_buffer_ranges<R: RangeBounds<u64>>(
         &mut self,
-        device: &VulkanDevice,
+        device: &LogicalDevice,
         src: &GpuBuffer,
         src_ranges: &[R],
         dst_offsets: &[u64],
@@ -200,7 +210,7 @@ impl GpuBuffer {
         }
     }
 
-    pub fn copy_from_buffer(&mut self, device: &VulkanDevice, src: &Self) -> BufferResult<()> {
+    pub fn copy_from_buffer(&mut self, device: &LogicalDevice, src: &Self) -> BufferResult<()> {
         if self.size < src.size {
             self.grow(device, src.size)?;
         }
@@ -240,7 +250,7 @@ impl GpuBuffer {
     /// * `dst_offsets` - Offset inside a destination (self) corresponding to the source ranges
     pub unsafe fn copy_from_buffer_raw(
         &mut self,
-        device: &VulkanDevice,
+        device: &LogicalDevice,
         src: vk::Buffer,
         src_ranges: &[(u64, u64)],
         dst_offsets: &[u64],
@@ -294,18 +304,12 @@ impl GpuBuffer {
         Ok(())
     }
 
-    pub fn grow(&mut self, device: &VulkanDevice, size: usize) -> BufferResult<()> {
+    pub fn grow(&mut self, device: &LogicalDevice, size: vk::DeviceSize) -> BufferResult<()> {
         if size < self.size {
             return Ok(());
         }
 
-        let mut new_buffer = Self::new(
-            device,
-            size,
-            self.buffer_usage,
-            self.mem_usage,
-            self.alloc_flags,
-        )?;
+        let mut new_buffer = Self::new(size, self.buffer_usage, self.mem_usage, self.alloc_flags)?;
 
         new_buffer.copy_from_buffer(device, &self)?;
 
@@ -316,7 +320,7 @@ impl GpuBuffer {
         Ok(())
     }
 
-    pub fn destroy(&mut self, device: &VulkanDevice) {
+    pub fn destroy(&mut self, device: &LogicalDevice) {
         unsafe {
             device
                 .allocator
@@ -326,15 +330,26 @@ impl GpuBuffer {
 
     pub fn map_as_slice<'a, T>(
         &'a mut self,
-        device: &'a VulkanDevice,
-    ) -> BufferResult<MappedSlice<'a, T>> {
+        offset: usize,
+        len: usize,
+    ) -> BufferResult<MappedAllocation<'a, [T]>> {
+        let size = size_of::<T>() * len;
+
+        if offset + size > self.size as usize {
+            return panic!("Buffer is too small!");
+        }
+
+        let device = get_device();
+
         let slice = unsafe {
             let ptr = device.allocator.map_memory(&mut self.allocation)? as *mut T;
-            let len = self.size / size_of::<T>();
+            let len = self.size as usize / size_of::<T>();
             &mut *slice_from_raw_parts_mut(ptr, len)
         };
 
-        let mapped_allocation = MappedSlice {
+        let mapped_allocation = MappedAllocation {
+            offset,
+            size,
             allocator: &device.allocator,
             allocation: &mut self.allocation,
             data: slice,
@@ -342,29 +357,56 @@ impl GpuBuffer {
 
         Ok(mapped_allocation)
     }
+
+    pub fn map_memory<'a, T>(&'a mut self, offset: usize) -> BufferResult<MappedAllocation<'a, T>> {
+        let size = size_of::<T>();
+
+        if offset + size > self.size as usize {
+            return panic!("Buffer is too small!");
+        }
+
+        let device = get_device();
+
+        let data = unsafe {
+            let ptr = device.allocator.map_memory(&mut self.allocation)? as *mut T;
+            &mut *ptr
+        };
+
+        let mapped_allocation = MappedAllocation {
+            offset,
+            size,
+            allocator: &device.allocator,
+            allocation: &mut self.allocation,
+            data,
+        };
+
+        Ok(mapped_allocation)
+    }
 }
 
-pub struct MappedSlice<'a, T> {
+pub struct MappedAllocation<'a, T: ?Sized> {
+    offset: usize,
+    size: usize,
     allocator: &'a vma::Allocator,
     allocation: &'a mut vma::Allocation,
-    data: &'a mut [T],
+    data: &'a mut T,
 }
 
-impl<T> Drop for MappedSlice<'_, T> {
+impl<T: ?Sized> Drop for MappedAllocation<'_, T> {
     fn drop(&mut self) {
         unsafe { self.allocator.unmap_memory(self.allocation) }
     }
 }
 
-impl<'a, T> Deref for MappedSlice<'a, T> {
-    type Target = [T];
+impl<'a, T: ?Sized> Deref for MappedAllocation<'a, T> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.data
     }
 }
 
-impl<'a, T> DerefMut for MappedSlice<'a, T> {
+impl<'a, T: ?Sized> DerefMut for MappedAllocation<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.data
     }

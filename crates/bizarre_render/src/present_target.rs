@@ -1,14 +1,14 @@
 use std::ffi::c_void;
 
-use ash::vk;
+use ash::{nv::shader_subgroup_partitioned, vk};
 use bizarre_core::Handle;
 use bizarre_log::{core_info, core_trace, core_warn};
 use nalgebra_glm::UVec2;
 use thiserror::Error;
 
 use crate::{
-    device::VulkanDevice,
-    image::AttachmentImage,
+    device::LogicalDevice,
+    image::VulkanImage,
     instance::VulkanInstance,
     render_target::{ImageRenderTarget, RenderData},
 };
@@ -96,7 +96,7 @@ pub struct PresentTarget {
 impl PresentTarget {
     pub(crate) unsafe fn new(
         instance: &VulkanInstance,
-        device: &VulkanDevice,
+        device: &LogicalDevice,
         cmd_pool: vk::CommandPool,
         extent: UVec2,
         display: *mut vk::wl_display,
@@ -114,7 +114,7 @@ impl PresentTarget {
         let swapchain_loader =
             ash::khr::swapchain::Device::new(&instance.instance, &device.logical);
 
-        let support = SwapchainSupportInfo::query_support_info(instance, device.physical, surface);
+        let support = SwapchainSupportInfo::query_support_info(instance, *device.physical, surface);
 
         let present_mode = choose_present_mode(&support.present_modes);
         let format = choose_surface_format(&support.formats);
@@ -130,8 +130,11 @@ impl PresentTarget {
             }
         };
 
-        let image_count =
-            (support.capabilities.min_image_count + 1).min(support.capabilities.max_image_count);
+        let image_count = if support.capabilities.max_image_count > 0 {
+            (support.capabilities.min_image_count + 1).min(support.capabilities.max_image_count)
+        } else {
+            support.capabilities.min_image_count + 1
+        };
 
         let (swapchain, images, image_views) = create_swapchain(
             device,
@@ -198,8 +201,8 @@ impl PresentTarget {
 
     pub fn record_present(
         &mut self,
-        device: &VulkanDevice,
-        render_image: &AttachmentImage,
+        device: &LogicalDevice,
+        render_image: &VulkanImage,
     ) -> PresentResult<PresentData> {
         let image_acquired = {
             let create_info = vk::SemaphoreCreateInfo::default();
@@ -240,10 +243,10 @@ impl PresentTarget {
 
     fn record_present_cmd(
         &self,
-        device: &VulkanDevice,
+        device: &LogicalDevice,
         cmd: vk::CommandBuffer,
         present_image: vk::Image,
-        render_image: &AttachmentImage,
+        render_image: &VulkanImage,
     ) -> PresentResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::default();
 
@@ -337,7 +340,11 @@ impl PresentTarget {
         Ok(())
     }
 
-    pub fn resize(&mut self, device: &VulkanDevice, size: UVec2) -> PresentResult<()> {
+    pub fn size(&self) -> UVec2 {
+        self.size
+    }
+
+    pub fn resize(&mut self, device: &LogicalDevice, size: UVec2) -> PresentResult<()> {
         let extent = vk::Extent2D {
             width: size.x,
             height: size.y,
@@ -371,7 +378,7 @@ impl PresentTarget {
         Ok(())
     }
 
-    pub fn destroy(&mut self, device: &VulkanDevice) {
+    pub fn destroy(&mut self, device: &LogicalDevice) {
         self.image_views
             .drain(..)
             .for_each(|image_view| unsafe { device.logical.destroy_image_view(image_view, None) });
@@ -418,7 +425,7 @@ fn choose_present_mode(modes: &Vec<vk::PresentModeKHR>) -> vk::PresentModeKHR {
 
 #[inline]
 fn create_swapchain(
-    device: &VulkanDevice,
+    device: &LogicalDevice,
     swapchain_loader: &ash::khr::swapchain::Device,
     extent: vk::Extent2D,
     image_count: u32,

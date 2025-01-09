@@ -1,44 +1,47 @@
-use std::collections::HashMap;
+use core::fmt::Debug;
 use std::ffi::c_void;
 use std::sync::atomic;
 use std::sync::atomic::AtomicUsize;
+use std::{collections::HashMap, path::Path};
 
 use ash::vk;
-use ash::vk::Handle as _;
+use bizarre_core::handle::DenseHandleStrategy;
 use bizarre_ecs::prelude::Resource;
-use bizarre_log::core_info;
 use bizarre_window::Window;
 use nalgebra_glm::UVec2;
 use thiserror::Error;
 
+use crate::material::material_instance::{MaterialInstance, MaterialInstanceHandle};
+use crate::material::pipeline::{VulkanPipeline, VulkanPipelineRequirements};
+use crate::material::{Material, MaterialHandle};
 use crate::{
-    antialiasing::{Antialiasing, MsaaFactor},
-    device::{DeviceError, VulkanDevice},
-    instance::{InstanceError, VulkanInstance},
-    material::pipeline::{
-        PipelineError, PipelineHandle, VulkanPipeline, VulkanPipelineRequirements,
-    },
+    antialiasing::Antialiasing,
+    asset_manager::AssetStore,
+    device::logical_device::DeviceError,
+    instance::InstanceError,
+    material::pipeline::PipelineError,
+    mesh::{Mesh, MeshHandle},
     present_target::{
         PresentData, PresentError, PresentResult, PresentTarget, PresentTargetHandle,
     },
-    render_pass::{RenderPassHandle, VulkanRenderPass},
-    render_target::{RenderData, RenderTarget, RenderTargetHandle, SwapchainRenderTarget},
+    render_target::{RenderTargetHandle, SwapchainRenderTarget},
+    scene::{object_pass::SceneObjectPass, Scene, SceneHandle},
     submitter::RenderPackage,
+    vulkan_context::{get_device, get_instance},
 };
 
 #[derive(Resource)]
 pub struct VulkanRenderer {
-    device: VulkanDevice,
-    instance: VulkanInstance,
-    present_targets: HashMap<PresentTargetHandle, PresentTarget>,
-    render_targets: HashMap<RenderTargetHandle, Box<dyn RenderTarget>>,
-    next_render_target_id: AtomicUsize,
-    pipelines: HashMap<PipelineHandle, VulkanPipeline>,
-    render_passes: HashMap<RenderPassHandle, VulkanRenderPass>,
-    render_cmd_buffer: vk::CommandBuffer,
-    present_cmd_buffer: vk::CommandBuffer,
+    max_frames_in_flight: u32,
     swapchain_loader: ash::khr::swapchain::Device,
     antialiasing: Antialiasing,
+
+    present_targets: HashMap<PresentTargetHandle, PresentTarget>,
+    render_targets: AssetStore<SwapchainRenderTarget, DenseHandleStrategy<SwapchainRenderTarget>>,
+    scenes: AssetStore<Scene, DenseHandleStrategy<Scene>>,
+    meshes: AssetStore<Mesh, DenseHandleStrategy<Mesh>>,
+    materials: AssetStore<Material, DenseHandleStrategy<Material>>,
+    material_instances: AssetStore<MaterialInstance, DenseHandleStrategy<MaterialInstance>>,
 }
 
 #[derive(Error, Debug)]
@@ -49,6 +52,8 @@ pub enum RenderError {
     CreateError(#[from] RendererCreateError),
     #[error(transparent)]
     PipelineError(#[from] PipelineError),
+    #[error("Invalid render target")]
+    InvalidRenderTarget,
 }
 #[derive(Error, Debug)]
 pub enum RendererCreateError {
@@ -62,85 +67,58 @@ pub type RenderResult<T> = Result<T, RenderError>;
 
 impl VulkanRenderer {
     pub fn new() -> RenderResult<Self> {
-        let instance = VulkanInstance::new();
-        let device = instance
-            .create_device_ext()
-            .map_err(|err| RenderError::CreateError(err.into()))?;
-
-        core_info!("Created a renderer");
-
-        let cmd_buffers = {
-            let allocate_info = vk::CommandBufferAllocateInfo::default()
-                .command_buffer_count(2)
-                .command_pool(device.cmd_pool)
-                .level(vk::CommandBufferLevel::PRIMARY);
-
-            unsafe { device.allocate_command_buffers(&allocate_info)? }
-        };
-
-        let (render_cmd_buffer, present_cmd_buffer) =
-            if let &[render_cmd, present_cmd, ..] = cmd_buffers.as_slice() {
-                (render_cmd, present_cmd)
-            } else {
-                unreachable!();
-            };
+        let instance = get_instance();
+        let device = get_device();
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&instance, &device);
 
         Ok(Self {
-            instance,
-            device,
+            // TODO: Make it dynamic and/or configurable
+            max_frames_in_flight: 3,
             present_targets: Default::default(),
             render_targets: Default::default(),
-            next_render_target_id: AtomicUsize::new(1),
-            pipelines: Default::default(),
-            render_passes: Default::default(),
-            render_cmd_buffer,
-            present_cmd_buffer,
             swapchain_loader,
-            antialiasing: Antialiasing::MSAA(MsaaFactor::X2),
+            antialiasing: Antialiasing::None,
+            scenes: Default::default(),
+            meshes: Default::default(),
+            materials: Default::default(),
+            material_instances: Default::default(),
         })
     }
 
     pub fn create_swapchain_render_target(
         &mut self,
         extent: UVec2,
-        render_pass: RenderPassHandle,
         image_count: u32,
     ) -> RenderResult<RenderTargetHandle> {
-        let render_pass = self
-            .render_passes
-            .get(&render_pass)
-            .expect("Failed to find this render pass");
+        let device = get_device();
 
         let render_target = SwapchainRenderTarget::new(
-            &self.device,
+            device,
             extent,
-            self.device.cmd_pool,
-            render_pass,
+            device.cmd_pool,
+            self.antialiasing.into(),
             image_count,
         )?;
 
-        let handle = RenderTargetHandle::from_raw(
-            self.next_render_target_id
-                .fetch_add(1, atomic::Ordering::SeqCst),
-        );
-
-        self.render_targets.insert(handle, Box::new(render_target));
+        let handle = self.render_targets.insert(render_target);
 
         Ok(handle)
     }
 
     pub fn create_present_target(&mut self, window: &Window) -> RenderResult<PresentTargetHandle> {
+        let device = get_device();
+        let instance = get_instance();
+
         let target = PresentTargetHandle::from_raw(window.handle().as_raw());
         let data = unsafe {
             let display = bizarre_window::get_wayland_display_ptr() as *mut vk::wl_display;
             let surface = window.raw_window_ptr() as *mut c_void;
 
             PresentTarget::new(
-                &self.instance,
-                &self.device,
-                self.device.cmd_pool,
+                instance,
+                device,
+                device.cmd_pool,
                 window.size(),
                 display,
                 surface,
@@ -152,7 +130,50 @@ impl VulkanRenderer {
         Ok(target)
     }
 
-    pub fn present_target(&mut self, handle: &PresentTargetHandle) -> Option<&PresentTarget> {
+    pub fn load_mesh<P>(&mut self, path: P) -> RenderResult<MeshHandle>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let mesh = Mesh::load_from_obj(path);
+
+        let handle = self.meshes.insert(mesh);
+
+        Ok(handle)
+    }
+
+    pub fn create_material(
+        &mut self,
+        pipeline_requirements: VulkanPipelineRequirements,
+    ) -> RenderResult<MaterialHandle> {
+        let pipeline =
+            VulkanPipeline::from_requirements(&pipeline_requirements, None, get_device())?;
+
+        let material = Material::new(pipeline, pipeline_requirements.bindings);
+
+        let handle = self.materials.insert(material);
+
+        Ok(handle)
+    }
+
+    pub fn insert_material(&mut self, material: Material) -> MaterialHandle {
+        self.materials.insert(material)
+    }
+
+    pub fn create_material_instance(
+        &mut self,
+        material: MaterialHandle,
+    ) -> RenderResult<MaterialInstanceHandle> {
+        let material_handle = material;
+        let material = self.materials.get(&material).unwrap();
+
+        let instance = MaterialInstance::new(material_handle, material).unwrap();
+
+        let handle = self.material_instances.insert(instance);
+
+        Ok(handle)
+    }
+
+    pub fn present_target(&self, handle: &PresentTargetHandle) -> Option<&PresentTarget> {
         self.present_targets.get(handle)
     }
 
@@ -166,11 +187,28 @@ impl VulkanRenderer {
             .get_mut(&present_target)
             .ok_or(PresentError::InvalidPresentTarget)?;
 
-        present_target.resize(&self.device, size)
+        present_target.resize(get_device(), size)
     }
 
     pub fn create_render_target(&mut self) -> RenderResult<RenderTargetHandle> {
         todo!()
+    }
+
+    pub fn create_scene(&mut self, max_frames_in_flight: usize) -> RenderResult<SceneHandle> {
+        let handle = self
+            .scenes
+            .insert(Scene::new(max_frames_in_flight).unwrap());
+
+        Ok(handle)
+    }
+
+    pub fn with_scene_mut<F>(&mut self, handle: &SceneHandle, func: F)
+    where
+        F: FnOnce(&mut Scene),
+    {
+        let scene = self.scenes.get_mut(handle).unwrap();
+
+        func(scene)
     }
 
     pub fn render_to_target(
@@ -178,7 +216,35 @@ impl VulkanRenderer {
         render_target: RenderTargetHandle,
         render_package: RenderPackage,
     ) -> RenderResult<()> {
-        todo!()
+        let RenderPackage {
+            scene: scene_handle,
+            pov,
+        } = render_package;
+
+        let scene = self.scenes.get_mut(&scene_handle).unwrap();
+
+        scene.sync_frame_data(&self.meshes);
+
+        let render_target = self
+            .render_targets
+            .get_mut(&render_target)
+            .ok_or(RenderError::InvalidRenderTarget)?;
+
+        let device = get_device();
+
+        let _ = render_target.begin_rendering(device)?;
+
+        let (indirect_buffer, indirect_iter) = scene.indirect_draw_iterator();
+
+        render_target.start_composition_pass(device)?;
+
+        render_target.end_rendering(device);
+
+        render_target.prepare_transfer(device);
+
+        render_target.submit_render(device)?;
+
+        Ok(())
     }
 
     pub fn present_to_target(
@@ -186,7 +252,9 @@ impl VulkanRenderer {
         present_target: PresentTargetHandle,
         render_target: RenderTargetHandle,
     ) -> PresentResult<()> {
-        unsafe { self.device.device_wait_idle() }?;
+        let device = get_device();
+
+        unsafe { device.device_wait_idle()? }
 
         let present_target = self.present_targets.get_mut(&present_target).unwrap();
         let render_target = self.render_targets.get_mut(&render_target).unwrap();
@@ -198,7 +266,7 @@ impl VulkanRenderer {
             image_ready,
             image_index: index,
         } = present_target
-            .record_present(&self.device, render_target.output_image())
+            .record_present(device, render_target.output_image())
             .unwrap();
 
         let swapchains = [swapchain];
@@ -222,8 +290,7 @@ impl VulkanRenderer {
 
             let submits = [submit_info];
 
-            self.device
-                .queue_submit(self.device.present_queue, &submits, vk::Fence::null())?;
+            device.queue_submit(device.present_queue, &submits, vk::Fence::null())?;
         };
 
         let present_info = vk::PresentInfoKHR::default()
@@ -233,75 +300,25 @@ impl VulkanRenderer {
 
         unsafe {
             self.swapchain_loader
-                .queue_present(self.device.present_queue, &present_info)?
+                .queue_present(device.present_queue, &present_info)?
         };
 
         render_target.next_frame();
 
         Ok(())
     }
-
-    pub fn create_pipeline(
-        &mut self,
-        requirements: &VulkanPipelineRequirements,
-    ) -> RenderResult<PipelineHandle> {
-        let render_pass = self
-            .render_passes
-            .get(&requirements.render_pass)
-            .expect(&format!(
-                "Failed to find `{:?}` renderpass in this renderer",
-                requirements.render_pass
-            ));
-
-        let pipeline =
-            VulkanPipeline::from_requirements(requirements, None, render_pass, &self.device)?;
-        let handle = PipelineHandle::from_raw(pipeline.pipeline.as_raw());
-        self.pipelines.insert(handle, pipeline);
-        Ok(handle)
-    }
-
-    pub fn create_render_pass_with<F>(&mut self, constructor: F) -> RenderResult<RenderPassHandle>
-    where
-        F: Fn(&VulkanDevice, vk::SampleCountFlags) -> Result<VulkanRenderPass, vk::Result>,
-    {
-        let render_pass = constructor(&self.device, self.antialiasing.into())?;
-        let handle = RenderPassHandle::from_raw(render_pass.render_pass.as_raw());
-        self.render_passes.insert(handle, render_pass);
-        Ok(handle)
-    }
-
-    pub fn render_pass(&self, handle: &RenderPassHandle) -> Option<&VulkanRenderPass> {
-        self.render_passes.get(handle)
-    }
-
-    fn destroy_render_passes(&mut self) {
-        self.render_passes
-            .drain()
-            .for_each(|(_, render_pass)| unsafe {
-                self.device
-                    .destroy_render_pass(render_pass.render_pass, None)
-            });
-    }
 }
 
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
+        let device = get_device();
+
         unsafe {
-            let _ = self.device.device_wait_idle();
+            let _ = device.device_wait_idle();
         }
-
-        self.pipelines
-            .drain()
-            .for_each(|(_, mut pipeline)| pipeline.destroy(&self.device));
-
-        self.destroy_render_passes();
-
-        self.render_targets
-            .drain()
-            .for_each(|(_, mut render_target)| render_target.destroy(&self.device));
 
         self.present_targets
             .drain()
-            .for_each(|(_, mut target)| target.destroy(&self.device));
+            .for_each(|(_, mut target)| target.destroy(device));
     }
 }

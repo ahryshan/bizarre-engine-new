@@ -4,17 +4,15 @@ use std::{ffi::CStr, fs::File, io::Read, ops::Deref, path::Path};
 use ash::vk;
 use bizarre_core::Handle;
 use bizarre_log::core_warn;
-use shaderc::CompilationArtifact;
 use thiserror::Error;
 
 use crate::{
-    device::VulkanDevice,
-    render_pass::{RenderPassHandle, VulkanRenderPass},
+    device::LogicalDevice,
     shader::{load_shader, ShaderError, ShaderKind},
 };
 
 use super::{
-    material_binding::{bindings_into_layouts, MaterialBinding, MaterialType},
+    material_binding::{bindings_into_layouts, MaterialBinding},
     pipeline_features::{PipelineFeatureFlags, VulkanPipelineFeatures},
 };
 
@@ -41,12 +39,12 @@ pub struct VulkanPipelineRequirements<'a> {
     pub features: VulkanPipelineFeatures,
     pub bindings: &'a [MaterialBinding],
     pub stage_definitions: &'a [ShaderStageDefinition],
-    pub render_pass: RenderPassHandle,
-    pub subpass: u32,
-    pub attachment_count: usize,
     pub base_pipeline: Option<&'a VulkanPipeline>,
     pub vertex_bindings: &'a [vk::VertexInputBindingDescription],
     pub vertex_attributes: &'a [vk::VertexInputAttributeDescription],
+    pub samples: vk::SampleCountFlags,
+    pub color_attachment_formats: &'a [vk::Format],
+    pub depth_attachment_format: vk::Format,
 }
 
 #[derive(Debug)]
@@ -60,8 +58,7 @@ impl VulkanPipeline {
     pub fn from_requirements(
         requirements: &VulkanPipelineRequirements,
         base_pipeline: Option<vk::Pipeline>,
-        render_pass: &VulkanRenderPass,
-        device: &VulkanDevice,
+        device: &LogicalDevice,
     ) -> PipelineResult<Self> {
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
 
@@ -97,10 +94,10 @@ impl VulkanPipeline {
 
         let multisampling_info = vk::PipelineMultisampleStateCreateInfo::default()
             .sample_shading_enable(false)
-            .rasterization_samples(render_pass.samples);
+            .rasterization_samples(requirements.samples);
 
         let color_blend_attachments = {
-            let mut attachments = Vec::with_capacity(requirements.attachment_count);
+            let mut attachments = Vec::with_capacity(requirements.color_attachment_formats.len());
             let mut blend_state = vk::PipelineColorBlendAttachmentState::default()
                 .color_write_mask(vk::ColorComponentFlags::RGBA);
 
@@ -153,7 +150,7 @@ impl VulkanPipeline {
                 blend_state = blend_state.blend_enable(false)
             }
 
-            for _ in 0..requirements.attachment_count {
+            for _ in 0..requirements.color_attachment_formats.len() {
                 attachments.push(blend_state.clone());
             }
 
@@ -218,6 +215,10 @@ impl VulkanPipeline {
             }
         }
 
+        let mut pipeline_rendering_info = vk::PipelineRenderingCreateInfo::default()
+            .color_attachment_formats(requirements.color_attachment_formats)
+            .depth_attachment_format(requirements.depth_attachment_format);
+
         let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)
             .vertex_input_state(&vertex_input_info)
@@ -229,8 +230,7 @@ impl VulkanPipeline {
             .color_blend_state(&color_blend_info)
             .dynamic_state(&dynamic_state_info)
             .layout(layout)
-            .render_pass(render_pass.render_pass)
-            .subpass(requirements.subpass);
+            .push_next(&mut pipeline_rendering_info);
 
         let pipeline_create_info = if let Some(pipeline) = base_pipeline {
             pipeline_create_info.base_pipeline_handle(pipeline)
