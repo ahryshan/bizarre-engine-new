@@ -8,6 +8,7 @@ use crate::{asset_manager::AssetStore, vertex::Vertex};
 
 pub type MeshHandle = Handle<Mesh>;
 
+#[derive(Debug, Default)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
@@ -25,24 +26,29 @@ impl Mesh {
     }
 
     pub fn load_from_obj<P: AsRef<Path> + Debug>(file_path: P) -> Self {
-        let (models, _) = tobj::load_obj(file_path, &LoadOptions::default()).unwrap();
+        let (models, _) = tobj::load_obj(
+            file_path,
+            &LoadOptions {
+                single_index: true,
+                triangulate: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let model = &models[0];
 
-        let vertices = model
-            .mesh
-            .positions
-            .chunks(3)
-            .map(|raw_pos| {
-                if let [x, y, z] = raw_pos {
-                    Vertex {
-                        position: Vec3::new(*x, *y, *z),
-                    }
-                } else {
-                    panic!("Trying to compose a vertex but there is not exactly 3 coords");
-                }
+        let positions = model.mesh.positions.chunks(3).map(Vec3::from_column_slice);
+        let normals = model.mesh.normals.chunks(3).map(Vec3::from_column_slice);
+
+        let vertices = positions
+            .zip(normals)
+            .map(|(position, normal)| Vertex {
+                position,
+                normal,
+                ..Default::default()
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let indices = model.mesh.indices.clone();
 

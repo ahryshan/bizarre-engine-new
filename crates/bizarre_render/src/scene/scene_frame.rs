@@ -8,7 +8,6 @@ use bizarre_core::handle::HandleStrategy;
 use crate::{
     asset_manager::AssetStore,
     buffer::GpuBuffer,
-    material::descriptor_buffer::DescriptorBuffer,
     mesh::{Mesh, MeshHandle},
     vertex::Vertex,
 };
@@ -22,10 +21,10 @@ use super::{
 bitflags! {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
     pub struct SceneFrameFlags: u8 {
-        const NEED_INSTANCE_DATA_REBUILD = 0b0000_0010;
-        const NEED_INDIRECT_REBUILD = 0b0000_0100;
-        const NEED_MESH_REBUILD = 0b0000_1000;
-        const NEED_INSTANCE_DATA_SYNC = 0b0001_0000;
+        const NEED_INSTANCE_DATA_REBUILD        = 0b0000_0001;
+        const NEED_INSTANCE_DATA_SYNC           = 0b0000_0010;
+        const NEED_MESH_REBUILD                 = 0b0000_0100;
+        const NEED_INDIRECT_REBUILD             = 0b0000_1000;
     }
 }
 
@@ -37,8 +36,8 @@ pub enum SceneChange {
     UpdateSceneUniform(SceneUniform),
 }
 
+#[derive(Debug)]
 pub struct SceneFrameData {
-    pub(crate) descriptor_buffer: DescriptorBuffer,
     pub(crate) flags: SceneFrameFlags,
     pub(crate) batches: Vec<RenderBatch>,
     pub(crate) vertex_buffer: GpuBuffer,
@@ -49,7 +48,7 @@ pub struct SceneFrameData {
     pub(crate) instance_mapping: Vec<Option<(usize, usize)>>,
     pub(crate) pending_changes: Vec<SceneChange>,
     pub(crate) instance_data: Vec<InstanceData>,
-    pub(crate) instance_data_gpu: GpuBuffer,
+    pub(crate) instance_data_ubo: GpuBuffer,
     pub(crate) indirect_buffer: GpuBuffer,
     pub(crate) indirect_helpers: Vec<u32>,
 }
@@ -59,17 +58,17 @@ impl SceneFrameData {
         let vertex_buffer = GpuBuffer::new(
             (size_of::<Vertex>() * INITIAL_VERTEX_LEN) as vk::DeviceSize,
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            vma::MemoryUsage::AutoPreferDevice,
-            vma::AllocationCreateFlags::empty(),
+            vma::MemoryUsage::Auto,
+            vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
         )?;
         let index_buffer = GpuBuffer::new(
             (size_of::<u32>() * INITIAL_INDEX_LEN) as vk::DeviceSize,
             vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            vma::MemoryUsage::AutoPreferDevice,
-            vma::AllocationCreateFlags::empty(),
+            vma::MemoryUsage::Auto,
+            vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
         )?;
 
-        let instance_data_gpu = GpuBuffer::new(
+        let instance_data_ubo = GpuBuffer::new(
             (size_of::<InstanceData>() * INITIAL_INSTANCE_LEN) as vk::DeviceSize,
             vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             vma::MemoryUsage::Auto,
@@ -90,22 +89,7 @@ impl SceneFrameData {
             vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
         )?;
 
-        let descriptor_buffer = {
-            let bindings = [vk::DescriptorSetLayoutBinding::default()
-                .binding(0)
-                .descriptor_count(1)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .stage_flags(vk::ShaderStageFlags::ALL)];
-
-            let mut buffer = DescriptorBuffer::new(1, &bindings, vk::BufferUsageFlags::empty())?;
-
-            unsafe { buffer.set_uniform_buffer(&scene_uniform_buffer, 0) };
-
-            buffer
-        };
-
         let frame = Self {
-            descriptor_buffer,
             scene_uniform_buffer,
             batches: Vec::default(),
             flags: SceneFrameFlags::empty(),
@@ -114,7 +98,7 @@ impl SceneFrameData {
             indirect_buffer,
             indirect_helpers: Default::default(),
             instance_data: Default::default(),
-            instance_data_gpu,
+            instance_data_ubo,
             instance_mapping: Default::default(),
             mesh_map: Default::default(),
             pending_changes: Default::default(),
@@ -326,17 +310,19 @@ impl SceneFrameData {
                 mapped_slice.clone_from_slice(&indirects);
             }
             self.indirect_buffer
-                .flush_range(0, indirects.len() as vk::DeviceSize);
+                .flush_range(0, indirects.len() as vk::DeviceSize)
+                .unwrap();
         }
 
         self.indirect_helpers = helpers;
+        self.flags.remove(SceneFrameFlags::NEED_INDIRECT_REBUILD);
     }
 
     #[inline]
     fn sync_instance_data(&mut self) {
         //TODO: Make it to actually sync only needed ranges
         let mut mapped_slice = self
-            .instance_data_gpu
+            .instance_data_ubo
             .map_as_slice(0, self.instance_data.len())
             .unwrap();
 
@@ -344,8 +330,9 @@ impl SceneFrameData {
 
         drop(mapped_slice);
 
-        self.instance_data_gpu
-            .flush_range(0, self.instance_data.len() as vk::DeviceSize);
+        self.instance_data_ubo
+            .flush_range(0, self.instance_data.len() as vk::DeviceSize)
+            .unwrap();
 
         self.flags.remove(SceneFrameFlags::NEED_INSTANCE_DATA_SYNC);
     }
@@ -353,11 +340,6 @@ impl SceneFrameData {
     #[inline]
     fn rebuild_instance_data(&mut self) {
         self.sync_instance_data();
-
-        unsafe {
-            self.descriptor_buffer
-                .set_uniform_buffer(&self.instance_data_gpu, 1)
-        };
 
         self.flags
             .remove(SceneFrameFlags::NEED_INSTANCE_DATA_REBUILD);

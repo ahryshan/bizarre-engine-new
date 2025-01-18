@@ -28,6 +28,10 @@ impl<T> Handle<T> {
             _marker: PhantomData,
         }
     }
+
+    pub const fn null() -> Self {
+        Self::from_raw(0usize)
+    }
 }
 
 #[const_trait]

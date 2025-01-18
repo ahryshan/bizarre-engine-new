@@ -6,7 +6,7 @@ use std::{
 use ash::vk;
 use bitflags::bitflags;
 use bizarre_core::{handle::HandleStrategy, Handle};
-use bizarre_log::core_trace;
+use bizarre_log::{core_info, core_trace};
 use nalgebra_glm::Mat4;
 use render_batch::RenderBatch;
 use render_object::{RenderObject, RenderObjectMaterials};
@@ -16,7 +16,6 @@ use thiserror::Error;
 use crate::{
     asset_manager::AssetStore,
     buffer::{BufferError, GpuBuffer},
-    material::descriptor_buffer::DescriptorBuffer,
     mesh::{Mesh, MeshHandle},
     vertex::Vertex,
 };
@@ -60,6 +59,7 @@ pub struct InstanceData {
     pub transform: Mat4,
 }
 
+#[derive(Debug)]
 pub struct Scene {
     max_frames_in_flight: usize,
     current_frame: usize,
@@ -90,6 +90,22 @@ impl Scene {
             current_frame: 0,
             frames,
         })
+    }
+
+    pub fn scene_ubo(&self) -> &GpuBuffer {
+        &self.frames[self.current_frame].scene_uniform_buffer
+    }
+
+    pub fn instance_data_ubo(&self) -> &GpuBuffer {
+        &self.frames[self.current_frame].instance_data_ubo
+    }
+
+    pub fn vertex_buffer(&self) -> vk::Buffer {
+        self.frames[self.current_frame].vertex_buffer.buffer()
+    }
+
+    pub fn index_buffer(&self) -> vk::Buffer {
+        self.frames[self.current_frame].index_buffer.buffer()
     }
 
     pub fn sync_frame_data<S: HandleStrategy<Mesh>>(&mut self, mesh_store: &AssetStore<Mesh, S>) {
@@ -151,6 +167,7 @@ impl Scene {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SceneIndirectDrawIterator<'a> {
     scene: &'a Scene,
     indirect_offset: vk::DeviceSize,
@@ -160,9 +177,9 @@ pub struct SceneIndirectDrawIterator<'a> {
 }
 
 pub struct IndirectIterItem<'a> {
-    materials: &'a RenderObjectMaterials,
-    offset: vk::DeviceSize,
-    count: u32,
+    pub materials: &'a RenderObjectMaterials,
+    pub offset: vk::DeviceSize,
+    pub count: u32,
 }
 
 impl<'a> Iterator for SceneIndirectDrawIterator<'a> {
@@ -191,6 +208,7 @@ impl<'a> Iterator for SceneIndirectDrawIterator<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct MeshMapping {
     index_offset: u32,
     index_count: u32,

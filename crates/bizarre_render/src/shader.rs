@@ -5,6 +5,7 @@ use std::{
 };
 
 use ash::vk;
+use bitflags::bitflags;
 use bizarre_core::utils::{io_err_mapper, FromIoError};
 use bizarre_log::core_info;
 use thiserror::Error;
@@ -37,34 +38,95 @@ pub type ShaderResult<T> = Result<T, ShaderError>;
 const SRC_SHADER_PREFIX: &'static str = "assets/shaders/";
 const CACHE_SHADER_PREFIX: &'static str = "cache/shaders";
 
-#[derive(Clone, Copy, Debug)]
-pub enum ShaderKind {
-    Vertex,
-    Fragment,
-    Compute,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ShaderStage {
+    Vertex = vk::ShaderStageFlags::VERTEX.as_raw(),
+    Fragment = vk::ShaderStageFlags::FRAGMENT.as_raw(),
 }
 
-impl From<ShaderKind> for shaderc::ShaderKind {
-    fn from(value: ShaderKind) -> Self {
+impl From<ShaderStage> for shaderc::ShaderKind {
+    fn from(value: ShaderStage) -> Self {
         match value {
-            ShaderKind::Vertex => shaderc::ShaderKind::Vertex,
-            ShaderKind::Fragment => shaderc::ShaderKind::Fragment,
-            ShaderKind::Compute => shaderc::ShaderKind::Compute,
+            ShaderStage::Vertex => shaderc::ShaderKind::Vertex,
+            ShaderStage::Fragment => shaderc::ShaderKind::Fragment,
         }
     }
 }
 
-impl From<ShaderKind> for vk::ShaderStageFlags {
-    fn from(value: ShaderKind) -> Self {
+impl From<ShaderStage> for vk::ShaderStageFlags {
+    fn from(value: ShaderStage) -> Self {
         match value {
-            ShaderKind::Vertex => vk::ShaderStageFlags::VERTEX,
-            ShaderKind::Fragment => vk::ShaderStageFlags::FRAGMENT,
-            ShaderKind::Compute => vk::ShaderStageFlags::COMPUTE,
+            ShaderStage::Vertex => vk::ShaderStageFlags::VERTEX,
+            ShaderStage::Fragment => vk::ShaderStageFlags::FRAGMENT,
         }
     }
 }
 
-pub fn load_shader(path: &Path, shader_type: ShaderKind) -> ShaderResult<Vec<u32>> {
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ShaderStages {
+    Single(ShaderStage),
+    Multiple(ShaderStageFlags),
+}
+
+impl From<ShaderStages> for shaderc::ShaderKind {
+    fn from(value: ShaderStages) -> Self {
+        match value {
+            ShaderStages::Single(shader_stage) => shader_stage.into(),
+            ShaderStages::Multiple(_) => {
+                panic!("Cannot convert multiple `ShaderStageFlags` to `shaderc::ShaderKind`")
+            }
+        }
+    }
+}
+
+impl From<ShaderStages> for vk::ShaderStageFlags {
+    fn from(value: ShaderStages) -> Self {
+        match value {
+            ShaderStages::Single(shader_stage) => {
+                vk::ShaderStageFlags::from_raw(shader_stage as u32)
+            }
+            ShaderStages::Multiple(shader_stage_flags) => {
+                vk::ShaderStageFlags::from_raw(shader_stage_flags.bits())
+            }
+        }
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct ShaderStageFlags: u32 {
+        const VERTEX = vk::ShaderStageFlags::VERTEX.as_raw();
+        const FRAGMENT = vk::ShaderStageFlags::FRAGMENT.as_raw();
+    }
+}
+
+impl From<ShaderStage> for ShaderStageFlags {
+    fn from(value: ShaderStage) -> Self {
+        match value {
+            ShaderStage::Vertex => ShaderStageFlags::VERTEX,
+            ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
+        }
+    }
+}
+
+impl From<ShaderStageFlags> for vk::ShaderStageFlags {
+    fn from(value: ShaderStageFlags) -> Self {
+        vk::ShaderStageFlags::from_raw(value.bits())
+    }
+}
+
+impl From<ShaderStageFlags> for ShaderStage {
+    fn from(value: ShaderStageFlags) -> Self {
+        match value {
+            ShaderStageFlags::VERTEX => ShaderStage::Vertex,
+            ShaderStageFlags::FRAGMENT => ShaderStage::Fragment,
+            _ => panic!("cannot convert `ShaderStageFlags` into `ShaderStage` when there are more than one flag set")
+        }
+    }
+}
+
+pub fn load_shader(path: &Path, shader_type: ShaderStage) -> ShaderResult<Vec<u32>> {
     let filename = path.file_name().unwrap().to_str().unwrap();
     let asset_dir = path
         .parent()
@@ -143,7 +205,7 @@ pub fn load_shader(path: &Path, shader_type: ShaderKind) -> ShaderResult<Vec<u32
 
 pub fn compile_shader<S>(
     stream: &mut S,
-    shader_type: ShaderKind,
+    shader_type: ShaderStage,
     path: &Path,
 ) -> ShaderResult<shaderc::CompilationArtifact>
 where

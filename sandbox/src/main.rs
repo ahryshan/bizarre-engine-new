@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use anyhow::Result;
 
 use bizarre_engine::{
@@ -5,8 +7,10 @@ use bizarre_engine::{
     ecs::{system::schedule::Schedule, world::ecs_module::EcsModule},
     ecs_modules::{InputModule, WindowModule},
     event::Events,
+    log::trace,
     prelude::{Res, ResMut, *},
     render::{
+        asset_manager::RenderAssets,
         material::builtin::basic_deferred,
         present_target::PresentTargetHandle,
         render_target::RenderTargetHandle,
@@ -20,7 +24,7 @@ use bizarre_engine::{
     window::{window_events::WindowEvent, window_manager::WindowManager, WindowCreateInfo},
 };
 
-use nalgebra_glm::{look_at, perspective_fov, radians, Mat4, UVec2, Vec1, Vec3};
+use nalgebra_glm::{look_at, perspective, perspective_fov, radians, Mat4, UVec2, Vec1, Vec3};
 
 struct RenderModule;
 
@@ -32,65 +36,69 @@ struct MainRenderTarget(pub RenderTargetHandle);
 
 impl EcsModule for RenderModule {
     fn apply(self, world: &mut bizarre_engine::ecs::world::World) {
-        let mut renderer = VulkanRenderer::new().unwrap();
+        let renderer = VulkanRenderer::new().unwrap();
         let main_window = world
             .resource_mut::<WindowManager>()
             .unwrap()
             .get_main_window()
             .unwrap();
 
-        let present_target_handle = renderer.create_present_target(&main_window).unwrap();
+        let mut assets = RenderAssets::new();
 
-        let (image_count, width, height) = {
-            let present_target = renderer.present_target(&present_target_handle).unwrap();
-            let size = present_target.size();
+        let present_target_handle =
+            assets.create_present_target(&main_window, renderer.image_count());
 
-            (present_target.image_count(), size.x, size.y)
+        let (width, height) = {
+            let size = main_window.size();
+            (size.x, size.y)
         };
 
-        let render_target = renderer
-            .create_swapchain_render_target(main_window.size(), image_count)
-            .unwrap();
+        let image_count = renderer.image_count();
 
-        let scene = renderer.create_scene(image_count as usize).unwrap();
+        let render_target = assets.create_swapchain_render_target(
+            main_window.size(),
+            image_count,
+            renderer.antialising(),
+        );
 
-        let mesh = renderer.load_mesh("assets/meshes/cube.obj").unwrap();
+        let mesh = assets.load_mesh("assets/meshes/cube.obj");
 
-        let material = renderer.insert_material(basic_deferred());
-        let material_instance = renderer.create_material_instance(material).unwrap();
+        let material = assets.insert_material(basic_deferred());
+        let (instance_handle, _) = assets.create_material_instance(material).unwrap();
 
         let render_object = RenderObject {
             flags: RenderObjectFlags::empty(),
-            materials: RenderObjectMaterials::new(material_instance),
+            materials: RenderObjectMaterials::new(instance_handle),
             mesh,
             instance_data: InstanceData {
                 transform: Mat4::identity(),
             },
         };
 
-        renderer.with_scene_mut(&scene, |scene| {
-            let _ = scene.add_object(render_object);
+        let scene_handle = assets.create_scene(image_count);
+        let scene = assets.scene_mut(&scene_handle).unwrap();
 
-            let view = look_at(
-                &Vec3::new(0.0, 2.0, 5.0),
-                &Vec3::zeros(),
-                &Vec3::new(0.0, 1.0, 0.0),
-            );
+        let _ = scene.add_object(render_object);
 
-            let projection = perspective_fov(
-                radians(&Vec1::new(90.0)).x,
-                width as f32,
-                height as f32,
-                0.001,
-                1000.0,
-            );
+        let view = look_at(
+            &Vec3::new(3.0, 2.0, 10.0),
+            &Vec3::zeros(),
+            &Vec3::new(0.0, 1.0, 0.0),
+        );
 
-            scene.update_scene_uniform(SceneUniform { view, projection })
-        });
+        let projection = perspective(
+            width as f32 / height as f32,
+            90.0f32.to_radians(),
+            0.1,
+            1000.0,
+        );
+
+        scene.update_scene_uniform(SceneUniform { view, projection });
 
         world.insert_resource(MainPresentTarget(present_target_handle));
         world.insert_resource(MainRenderTarget(render_target));
         world.insert_resource(renderer);
+        world.insert_resource(assets);
 
         world.add_systems(Schedule::Update, render);
     }
@@ -98,31 +106,40 @@ impl EcsModule for RenderModule {
 
 fn render(
     mut renderer: ResMut<VulkanRenderer>,
+    mut assets: ResMut<RenderAssets>,
+    mut last_render: Local<Instant>,
     present_target: Res<MainPresentTarget>,
     render_target: Res<MainRenderTarget>,
     window_events: Events<WindowEvent>,
 ) {
+    let elapsed = last_render.elapsed();
+    let target = Duration::from_millis(16);
+
+    if elapsed < target {
+        std::thread::sleep(target - elapsed);
+        *last_render = Instant::now();
+    }
+
     if let Some(window_events) = window_events.as_ref() {
         for event in window_events.iter() {
             if let WindowEvent::Resize { handle, size } = event {
-                let present_target = PresentTargetHandle::from_raw(handle.as_raw());
-                renderer
-                    .resize_present_target(present_target, *size)
-                    .unwrap();
+                let handle = PresentTargetHandle::from_raw(handle.as_raw());
+                let present_target = assets.present_target_mut(&handle).unwrap();
+                present_target.resize(*size).unwrap();
             }
         }
     }
 
     let render_package = RenderPackage {
         pov: Mat4::default(),
-        scene: SceneHandle::from_raw(0usize),
+        scene: SceneHandle::from_raw(1usize),
     };
 
     renderer
-        .render_to_target(render_target.0, render_package)
+        .render_to_target(&mut assets, render_target.0, render_package)
         .unwrap();
     renderer
-        .present_to_target(present_target.0, render_target.0)
+        .present_to_target(&mut assets, present_target.0, render_target.0)
         .unwrap();
 }
 

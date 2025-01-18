@@ -1,13 +1,12 @@
 use ash::vk;
 use bizarre_core::Handle;
-use material_binding::{BindObject, BindObjectSet, BindingSet, BindingType, MaterialBinding};
+use material_binding::{MaterialBinding, MaterialBindingSet};
 use pipeline::VulkanPipeline;
 use thiserror::Error;
 
-use crate::device::LogicalDevice;
-
 pub mod builtin;
 pub mod descriptor_buffer;
+pub mod instance_binding;
 pub mod material_binding;
 pub mod material_instance;
 pub mod pipeline;
@@ -22,8 +21,8 @@ pub enum MaterialError {
     #[error("Trying to set binding at index {index} to object `{provided:?}` while the the actual binding at this index is `{actual:?}`")]
     WrongBindingObjectType {
         index: usize,
-        provided: BindingType,
-        actual: BindingType,
+        provided: vk::DescriptorType,
+        actual: vk::DescriptorType,
     },
     #[error("Incomplete bindning set")]
     IncompleteBindingSet,
@@ -35,15 +34,19 @@ pub type MaterialHandle = Handle<Material>;
 
 pub struct Material {
     pipeline: VulkanPipeline,
-    bindings: BindingSet,
+    bindings: MaterialBindingSet,
 }
 
 pub struct MaterialCreateInfo {}
 
 impl Material {
     pub fn new(pipeline: VulkanPipeline, bindings: &[MaterialBinding]) -> Self {
-        let bindings = BindingSet::from(bindings);
+        let bindings = MaterialBindingSet::from(bindings.to_vec());
 
         Self { pipeline, bindings }
+    }
+
+    pub(crate) fn pipeline(&self) -> &VulkanPipeline {
+        &self.pipeline
     }
 }

@@ -7,11 +7,15 @@ use bizarre_log::{core_fatal, core_info};
 use nalgebra_glm::UVec2;
 
 use crate::{
-    device::LogicalDevice, image::VulkanImage, material::descriptor_buffer::DescriptorBuffer,
-    vulkan_context::get_device,
+    device::LogicalDevice,
+    image::{VulkanImage, VulkanImageView},
+    material::descriptor_buffer::DescriptorBuffer,
+    vulkan_context::{get_device, get_instance},
 };
 
 pub type RenderTargetHandle = Handle<SwapchainRenderTarget>;
+
+pub trait RenderFunction = FnOnce(&'static LogicalDevice, vk::CommandBuffer) -> RenderingResult<()>;
 
 pub struct RenderData {
     pub in_flight_fence: vk::Fence,
@@ -58,12 +62,51 @@ impl SwapchainRenderTarget {
         self.current_target().output_image()
     }
 
-    pub fn attachment_descriptor_buffer(&self) -> &DescriptorBuffer {
-        &self.current_target().attachments_descriptor_buffer
+    pub fn composition_attachments(&self) -> Vec<&VulkanImage> {
+        self.current_target().composition_attachments()
+    }
+
+    pub fn cmd_buffer(&self) -> vk::CommandBuffer {
+        self.current_target().render_cmd_buffer
     }
 
     pub fn render_complete_semaphore(&self) -> vk::Semaphore {
         self.current_target().render_complete
+    }
+
+    pub fn in_flight_fence(&self) -> vk::Fence {
+        self.current_target().in_flight_fence
+    }
+
+    pub fn render<D, C>(
+        &mut self,
+        vertex_buffer: vk::Buffer,
+        index_buffer: vk::Buffer,
+        deferred: D,
+        composition: C,
+    ) -> RenderingResult<()>
+    where
+        D: RenderFunction,
+        C: RenderFunction,
+    {
+        let device = get_device();
+        let cmd_buffer = self.current_target().render_cmd_buffer;
+
+        self.begin_rendering(device)?;
+
+        deferred(device, cmd_buffer)?;
+
+        self.start_composition_pass(device)?;
+
+        composition(device, cmd_buffer)?;
+
+        self.end_rendering(device);
+
+        self.prepare_transfer(device);
+
+        self.submit_render(device)?;
+
+        Ok(())
     }
 
     pub fn next_frame(&mut self) {
@@ -109,9 +152,6 @@ pub struct ImageRenderTarget {
     pub position_depth_attachment: VulkanImage,
     pub depth_image: VulkanImage,
 
-    pub attachments_descriptor_buffer: DescriptorBuffer,
-
-    pub attachment_sampler: vk::Sampler,
     pub output_attachment: VulkanImage,
     pub resolve_attachment: Option<VulkanImage>,
     pub size: UVec2,
@@ -147,83 +187,12 @@ impl ImageRenderTarget {
         let color_attachment = VulkanImage::attachment_image(size, samples)?;
         let normals_attachment = VulkanImage::attachment_image(size, samples)?;
         let position_depth_attachment = VulkanImage::attachment_image(size, samples)?;
-        let depth_image = VulkanImage::depth_image(size, samples)?;
+        let depth_attachment = VulkanImage::depth_image(size, samples)?;
 
         let (output_attachment, resolve_image) = if samples != vk::SampleCountFlags::TYPE_1 {
             todo!("Multisampling is yet to be implemented")
         } else {
             (VulkanImage::output_image(size)?, None)
-        };
-
-        let attachment_sampler = unsafe {
-            let create_info = vk::SamplerCreateInfo::default()
-                .min_filter(vk::Filter::NEAREST)
-                .mag_filter(vk::Filter::NEAREST);
-
-            device.create_sampler(&create_info, None)?
-        };
-
-        let samplers = [attachment_sampler];
-        let attachments_descriptor_buffer = {
-            let bindings = (0..3)
-                .map(|i| {
-                    vk::DescriptorSetLayoutBinding::default()
-                        .binding(i as u32)
-                        .descriptor_count(1)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .immutable_samplers(&samplers)
-                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                })
-                .collect::<Vec<_>>();
-
-            let mut buffer = DescriptorBuffer::new(
-                1,
-                &bindings,
-                vk::BufferUsageFlags::SAMPLER_DESCRIPTOR_BUFFER_EXT,
-            )?;
-
-            let attachments = [
-                &color_attachment,
-                &normals_attachment,
-                &position_depth_attachment,
-            ];
-
-            let mut accum_offset = 0;
-
-            let buffer_ptr = unsafe { buffer.map_ptr::<u8>()? };
-
-            if buffer_ptr.is_null() {
-                core_fatal!("Buffer ptr is null!");
-            }
-
-            for image in attachments {
-                let image_info = vk::DescriptorImageInfo::default()
-                    .image_view(image.image_view)
-                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                    .sampler(attachment_sampler);
-
-                let descriptor_info = vk::DescriptorGetInfoEXT::default()
-                    .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .data(vk::DescriptorDataEXT {
-                        p_combined_image_sampler: addr_of!(image_info),
-                    });
-
-                let size = device
-                    .physical
-                    .descriptor_buffer_props
-                    .combined_image_sampler_descriptor_size;
-
-                let descriptor =
-                    unsafe { slice::from_raw_parts_mut(buffer_ptr.add(accum_offset), size) };
-
-                buffer.get_descriptor(&descriptor_info, descriptor);
-
-                accum_offset += size;
-            }
-
-            unsafe { buffer.unmap_ptr() };
-
-            buffer
         };
 
         let render_ready = {
@@ -237,14 +206,21 @@ impl ImageRenderTarget {
             color_attachment,
             normals_attachment,
             position_depth_attachment,
-            depth_image,
+            depth_image: depth_attachment,
             resolve_attachment: resolve_image,
-            attachments_descriptor_buffer,
             size,
-            attachment_sampler,
             output_attachment,
             render_complete: render_ready,
         })
+    }
+
+    pub fn composition_attachments(&self) -> Vec<&VulkanImage> {
+        [
+            &self.color_attachment,
+            &self.normals_attachment,
+            &self.position_depth_attachment,
+        ]
+        .to_vec()
     }
 
     pub fn output_image(&self) -> &VulkanImage {
@@ -267,13 +243,34 @@ impl ImageRenderTarget {
 
             self.transition_images_to_deferred(device);
 
-            let clear_color_value = vk::ClearValue {
-                color: vk::ClearColorValue { float32: [0.0; 4] },
-            };
+            device.cmd_set_scissor(
+                self.render_cmd_buffer,
+                0,
+                &[vk::Rect2D {
+                    extent: vk::Extent2D {
+                        width: self.size.x,
+                        height: self.size.y,
+                    },
+                    ..Default::default()
+                }],
+            );
+
+            device.cmd_set_viewport(
+                self.render_cmd_buffer,
+                0,
+                &[vk::Viewport {
+                    height: -(self.size.y as f32),
+                    width: self.size.x as f32,
+                    x: 0.0,
+                    y: self.size.y as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }],
+            );
 
             let clear_depth_value = vk::ClearValue {
                 depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 0.0,
+                    depth: 1.0,
                     stencil: 0,
                 },
             };
@@ -285,9 +282,14 @@ impl ImageRenderTarget {
             ]
             .map(|image| {
                 vk::RenderingAttachmentInfo::default()
-                    .image_view(self.color_attachment.image_view)
+                    .image_view(image.image_view)
                     .image_layout(image.image_layout)
-                    .clear_value(clear_color_value.clone())
+                    .clear_value(
+                        (vk::ClearValue {
+                            color: vk::ClearColorValue { float32: [0.3; 4] },
+                        })
+                        .clone(),
+                    )
                     .load_op(vk::AttachmentLoadOp::CLEAR)
                     .store_op(vk::AttachmentStoreOp::STORE)
             });
@@ -330,30 +332,49 @@ impl ImageRenderTarget {
 
             self.transition_images_to_composition(device);
 
+            let clear_color = vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [1.0, 0.0, 0.0, 1.0],
+                },
+            };
+
+            let color_input_attachment = vk::RenderingAttachmentInfo::default()
+                .image_view(self.output_attachment.image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::LOAD)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .clear_value(clear_color);
+
+            let normals_input_attachment = vk::RenderingAttachmentInfo::default()
+                .image_view(self.normals_attachment.image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::LOAD)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .clear_value(clear_color);
+
+            let position_depth_input_attachment = vk::RenderingAttachmentInfo::default()
+                .image_view(self.position_depth_attachment.image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::LOAD)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .clear_value(clear_color);
+
             let color_attachment = vk::RenderingAttachmentInfo::default()
                 .image_view(self.output_attachment.image_view)
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [1.0, 0.0, 0.0, 0.0],
-                    },
-                });
+                .clear_value(clear_color);
 
-            let depth_attachment =
-                vk::RenderingAttachmentInfo::default().clear_value(vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 0.0,
-                        stencil: 0,
-                    },
-                });
-
-            let color_attachments = [color_attachment];
+            let color_attachments = [
+                color_input_attachment,
+                normals_input_attachment,
+                position_depth_input_attachment,
+                color_attachment,
+            ];
 
             let rendering_info = vk::RenderingInfo::default()
                 .color_attachments(&color_attachments)
-                .depth_attachment(&depth_attachment)
                 .layer_count(1)
                 .render_area(vk::Rect2D {
                     extent: vk::Extent2D {
@@ -462,7 +483,7 @@ impl ImageRenderTarget {
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
                 vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                vk::AccessFlags2::SHADER_SAMPLED_READ,
+                vk::AccessFlags2::COLOR_ATTACHMENT_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             )
         });
@@ -480,8 +501,6 @@ impl Drop for ImageRenderTarget {
         unsafe {
             device.destroy_semaphore(self.render_complete, None);
             device.destroy_fence(self.in_flight_fence, None);
-
-            device.destroy_sampler(self.attachment_sampler, None);
         }
     }
 }

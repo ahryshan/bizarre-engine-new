@@ -1,47 +1,52 @@
 use core::fmt::Debug;
-use std::ffi::c_void;
-use std::sync::atomic;
-use std::sync::atomic::AtomicUsize;
-use std::{collections::HashMap, path::Path};
+use std::ffi::{CStr, CString};
 
 use ash::vk;
-use bizarre_core::handle::DenseHandleStrategy;
-use bizarre_ecs::prelude::Resource;
-use bizarre_window::Window;
-use nalgebra_glm::UVec2;
+use bizarre_log::{core_info, core_trace};
 use thiserror::Error;
 
-use crate::material::material_instance::{MaterialInstance, MaterialInstanceHandle};
-use crate::material::pipeline::{VulkanPipeline, VulkanPipelineRequirements};
-use crate::material::{Material, MaterialHandle};
+use bizarre_core::Handle;
+use bizarre_ecs::prelude::Resource;
+
 use crate::{
     antialiasing::Antialiasing,
-    asset_manager::AssetStore,
+    asset_manager::RenderAssets,
+    buffer::GpuBuffer,
     device::logical_device::DeviceError,
+    image::VulkanImage,
     instance::InstanceError,
-    material::pipeline::PipelineError,
-    mesh::{Mesh, MeshHandle},
-    present_target::{
-        PresentData, PresentError, PresentResult, PresentTarget, PresentTargetHandle,
+    material::{
+        builtin::basic_composition,
+        descriptor_buffer::{self, DescriptorBuffer},
+        material_instance::{MaterialInstance, MaterialInstanceHandle},
+        pipeline::PipelineError,
+        Material, MaterialHandle,
     },
-    render_target::{RenderTargetHandle, SwapchainRenderTarget},
-    scene::{object_pass::SceneObjectPass, Scene, SceneHandle},
+    present_target::{PresentData, PresentResult, PresentTargetHandle},
+    render_target::RenderTargetHandle,
+    scene::{object_pass::SceneObjectPass, IndirectIterItem, Scene, SceneUniform},
     submitter::RenderPackage,
     vulkan_context::{get_device, get_instance},
 };
 
 #[derive(Resource)]
 pub struct VulkanRenderer {
-    max_frames_in_flight: u32,
+    image_count: u32,
+    current_frame: usize,
     swapchain_loader: ash::khr::swapchain::Device,
     antialiasing: Antialiasing,
 
-    present_targets: HashMap<PresentTargetHandle, PresentTarget>,
-    render_targets: AssetStore<SwapchainRenderTarget, DenseHandleStrategy<SwapchainRenderTarget>>,
-    scenes: AssetStore<Scene, DenseHandleStrategy<Scene>>,
-    meshes: AssetStore<Mesh, DenseHandleStrategy<Mesh>>,
-    materials: AssetStore<Material, DenseHandleStrategy<Material>>,
-    material_instances: AssetStore<MaterialInstance, DenseHandleStrategy<MaterialInstance>>,
+    uniform_buffers: DescriptorBuffer,
+    curr_uniform_index: usize,
+
+    textures: DescriptorBuffer,
+    curr_texture_index: usize,
+
+    input_attachments: DescriptorBuffer,
+    curr_input_index: usize,
+
+    basic_composition: Material,
+    basic_composition_instance: MaterialInstance,
 }
 
 #[derive(Error, Debug)]
@@ -63,6 +68,20 @@ pub enum RendererCreateError {
     DeviceError(#[from] DeviceError),
 }
 
+const IMAGE_COUNT: usize = 4;
+const UNIFORM_DESCRIPTOR_BUFFER_LEN: usize = 32;
+const TEXTURE_DESCRIPTOR_BUFFER_LEN: usize = 32;
+const INPUT_ATTACHMENT_BUFFER_LEN: usize = 32;
+
+const fn descriptor_buffer_len(descriptor_type: vk::DescriptorType) -> usize {
+    match descriptor_type {
+        vk::DescriptorType::UNIFORM_BUFFER => UNIFORM_DESCRIPTOR_BUFFER_LEN,
+        vk::DescriptorType::COMBINED_IMAGE_SAMPLER => TEXTURE_DESCRIPTOR_BUFFER_LEN,
+        vk::DescriptorType::INPUT_ATTACHMENT => INPUT_ATTACHMENT_BUFFER_LEN,
+        _ => panic!("Unsupported descriptor buffer type"),
+    }
+}
+
 pub type RenderResult<T> = Result<T, RenderError>;
 
 impl VulkanRenderer {
@@ -72,147 +91,62 @@ impl VulkanRenderer {
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&instance, &device);
 
+        let uniform_buffers = DescriptorBuffer::uniform_buffers(
+            descriptor_buffer_len(vk::DescriptorType::UNIFORM_BUFFER) * IMAGE_COUNT,
+        )?;
+
+        device.set_object_debug_name(uniform_buffers.buffer(), "renderer_uniforms");
+
+        let textures = DescriptorBuffer::textures(
+            descriptor_buffer_len(vk::DescriptorType::COMBINED_IMAGE_SAMPLER) * IMAGE_COUNT,
+        )?;
+
+        device.set_object_debug_name(textures.buffer(), "renderer_textures");
+
+        let input_attachments = DescriptorBuffer::new(
+            INPUT_ATTACHMENT_BUFFER_LEN * IMAGE_COUNT,
+            &[vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::INPUT_ATTACHMENT)],
+            vk::BufferUsageFlags::empty(),
+        )?;
+
+        device.set_object_debug_name(textures.buffer(), "renderer_input_attachments");
+
+        let basic_composition_mat = basic_composition();
+        let basic_composition_instance =
+            MaterialInstance::new(MaterialHandle::from_raw(0usize), &basic_composition_mat)
+                .unwrap();
+
         Ok(Self {
             // TODO: Make it dynamic and/or configurable
-            max_frames_in_flight: 3,
-            present_targets: Default::default(),
-            render_targets: Default::default(),
-            swapchain_loader,
+            image_count: IMAGE_COUNT as u32,
+            curr_uniform_index: 0,
+            curr_texture_index: 0,
+            curr_input_index: 0,
+            current_frame: 0,
             antialiasing: Antialiasing::None,
-            scenes: Default::default(),
-            meshes: Default::default(),
-            materials: Default::default(),
-            material_instances: Default::default(),
+            swapchain_loader,
+            uniform_buffers,
+            textures,
+            input_attachments,
+
+            basic_composition: basic_composition_mat,
+            basic_composition_instance,
         })
     }
 
-    pub fn create_swapchain_render_target(
-        &mut self,
-        extent: UVec2,
-        image_count: u32,
-    ) -> RenderResult<RenderTargetHandle> {
-        let device = get_device();
-
-        let render_target = SwapchainRenderTarget::new(
-            device,
-            extent,
-            device.cmd_pool,
-            self.antialiasing.into(),
-            image_count,
-        )?;
-
-        let handle = self.render_targets.insert(render_target);
-
-        Ok(handle)
-    }
-
-    pub fn create_present_target(&mut self, window: &Window) -> RenderResult<PresentTargetHandle> {
-        let device = get_device();
-        let instance = get_instance();
-
-        let target = PresentTargetHandle::from_raw(window.handle().as_raw());
-        let data = unsafe {
-            let display = bizarre_window::get_wayland_display_ptr() as *mut vk::wl_display;
-            let surface = window.raw_window_ptr() as *mut c_void;
-
-            PresentTarget::new(
-                instance,
-                device,
-                device.cmd_pool,
-                window.size(),
-                display,
-                surface,
-            )?
-        };
-
-        self.present_targets.insert(target, data);
-
-        Ok(target)
-    }
-
-    pub fn load_mesh<P>(&mut self, path: P) -> RenderResult<MeshHandle>
-    where
-        P: AsRef<Path> + Debug,
-    {
-        let mesh = Mesh::load_from_obj(path);
-
-        let handle = self.meshes.insert(mesh);
-
-        Ok(handle)
-    }
-
-    pub fn create_material(
-        &mut self,
-        pipeline_requirements: VulkanPipelineRequirements,
-    ) -> RenderResult<MaterialHandle> {
-        let pipeline =
-            VulkanPipeline::from_requirements(&pipeline_requirements, None, get_device())?;
-
-        let material = Material::new(pipeline, pipeline_requirements.bindings);
-
-        let handle = self.materials.insert(material);
-
-        Ok(handle)
-    }
-
-    pub fn insert_material(&mut self, material: Material) -> MaterialHandle {
-        self.materials.insert(material)
-    }
-
-    pub fn create_material_instance(
-        &mut self,
-        material: MaterialHandle,
-    ) -> RenderResult<MaterialInstanceHandle> {
-        let material_handle = material;
-        let material = self.materials.get(&material).unwrap();
-
-        let instance = MaterialInstance::new(material_handle, material).unwrap();
-
-        let handle = self.material_instances.insert(instance);
-
-        Ok(handle)
-    }
-
-    pub fn present_target(&self, handle: &PresentTargetHandle) -> Option<&PresentTarget> {
-        self.present_targets.get(handle)
-    }
-
-    pub fn resize_present_target(
-        &mut self,
-        present_target: PresentTargetHandle,
-        size: UVec2,
-    ) -> PresentResult<()> {
-        let present_target = self
-            .present_targets
-            .get_mut(&present_target)
-            .ok_or(PresentError::InvalidPresentTarget)?;
-
-        present_target.resize(get_device(), size)
-    }
-
-    pub fn create_render_target(&mut self) -> RenderResult<RenderTargetHandle> {
-        todo!()
-    }
-
-    pub fn create_scene(&mut self, max_frames_in_flight: usize) -> RenderResult<SceneHandle> {
-        let handle = self
-            .scenes
-            .insert(Scene::new(max_frames_in_flight).unwrap());
-
-        Ok(handle)
-    }
-
-    pub fn with_scene_mut<F>(&mut self, handle: &SceneHandle, func: F)
-    where
-        F: FnOnce(&mut Scene),
-    {
-        let scene = self.scenes.get_mut(handle).unwrap();
-
-        func(scene)
+    pub fn next_frame(&mut self) {
+        self.current_frame = (self.current_frame + 1) % self.image_count as usize;
+        self.curr_uniform_index = 0;
+        self.curr_texture_index = 0;
+        self.curr_input_index = 0;
     }
 
     pub fn render_to_target(
         &mut self,
+        assets: &mut RenderAssets,
         render_target: RenderTargetHandle,
         render_package: RenderPackage,
     ) -> RenderResult<()> {
@@ -221,34 +155,225 @@ impl VulkanRenderer {
             pov,
         } = render_package;
 
-        let scene = self.scenes.get_mut(&scene_handle).unwrap();
+        let device = get_device();
 
-        scene.sync_frame_data(&self.meshes);
+        // TODO: I'm really sorry for what I've done. But it's safe, I'm promise. I'll fix that later
+        let scene = unsafe { &mut *(assets.scenes.get_mut(&scene_handle).unwrap() as *mut Scene) };
 
-        let render_target = self
+        scene.sync_frame_data(&assets.meshes);
+
+        let (indirect_buffer, indirect_iter) = scene.indirect_draw_iterator();
+        let (_, scene_ubo_offset) = self.add_uniform(scene.scene_ubo());
+        self.add_uniform(scene.instance_data_ubo());
+        let vertex_buffer = scene.vertex_buffer();
+        let index_buffer = scene.index_buffer();
+
+        #[derive(Debug)]
+        struct DrawItem {
+            mat_handle: MaterialHandle,
+            inst_handle: MaterialInstanceHandle,
+            pipeline: vk::Pipeline,
+            pipeline_layout: vk::PipelineLayout,
+            offset: u64,
+            count: u32,
+        }
+
+        let deferred_indirects = indirect_iter
+            .clone()
+            .filter_map(
+                |IndirectIterItem {
+                     materials,
+                     offset,
+                     count,
+                 }| {
+                    let instance_handle = materials[SceneObjectPass::Deferred]?;
+                    let (material, instance) = assets.material_with_instance(&instance_handle)?;
+
+                    let pipeline = material.pipeline();
+
+                    Some(DrawItem {
+                        mat_handle: instance.material_handle(),
+                        inst_handle: instance_handle,
+                        pipeline: pipeline.pipeline,
+                        pipeline_layout: pipeline.layout,
+                        offset,
+                        count,
+                    })
+                },
+            )
+            .collect::<Vec<_>>();
+
+        let render_target = assets
             .render_targets
             .get_mut(&render_target)
             .ok_or(RenderError::InvalidRenderTarget)?;
 
-        let device = get_device();
+        render_target.begin_rendering(device)?;
 
-        let _ = render_target.begin_rendering(device)?;
+        let cmd_buffer = render_target.cmd_buffer();
 
-        let (indirect_buffer, indirect_iter) = scene.indirect_draw_iterator();
+        unsafe {
+            device.cmd_bind_vertex_buffers(cmd_buffer, 0, &[vertex_buffer], &[0]);
+            device.cmd_bind_index_buffer(cmd_buffer, index_buffer, 0, vk::IndexType::UINT32);
+        }
+
+        let mut bound_mat = Handle::null();
+        let mut bound_inst = Handle::null();
+
+        let db_device_ext = descriptor_buffer::device_ext();
+
+        for DrawItem {
+            mat_handle,
+            inst_handle,
+            pipeline,
+            pipeline_layout,
+            offset,
+            count,
+        } in deferred_indirects
+        {
+            let mat_rebind = bound_mat != mat_handle;
+            let inst_rebind = mat_rebind || bound_inst != inst_handle;
+
+            if mat_rebind {
+                unsafe {
+                    device.cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
+                }
+
+                bound_mat = mat_handle;
+            }
+
+            if inst_rebind {
+                let bind_info = [self.uniform_buffers.binding_info()];
+
+                unsafe {
+                    db_device_ext.cmd_bind_descriptor_buffers(cmd_buffer, &bind_info);
+
+                    db_device_ext.cmd_set_descriptor_buffer_offsets(
+                        cmd_buffer,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        pipeline_layout,
+                        0,
+                        &[0],
+                        &[scene_ubo_offset],
+                    );
+                }
+
+                bound_inst = inst_handle;
+            }
+
+            unsafe {
+                device.cmd_draw_indexed_indirect(
+                    cmd_buffer,
+                    indirect_buffer.buffer(),
+                    offset,
+                    count,
+                    size_of::<vk::DrawIndexedIndirectCommand>() as u32,
+                )
+            }
+        }
 
         render_target.start_composition_pass(device)?;
 
+        unsafe {
+            device.cmd_bind_pipeline(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.basic_composition.pipeline().pipeline,
+            )
+        };
+
+        let bind_info = [self.input_attachments.binding_info()];
+
+        let device_ext = descriptor_buffer::device_ext();
+
+        let attachment_offsets = render_target
+            .composition_attachments()
+            .into_iter()
+            .map(|image| self.add_input_attachment(image).1)
+            .collect::<Vec<_>>();
+
+        unsafe {
+            device_ext.cmd_bind_descriptor_buffers(cmd_buffer, &bind_info);
+
+            device_ext.cmd_set_descriptor_buffer_offsets(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.basic_composition.pipeline().layout,
+                0,
+                &[0],
+                &[attachment_offsets[0]],
+            );
+        }
+
+        unsafe { device.cmd_draw(cmd_buffer, 6, 1, 0, 0) }
+
         render_target.end_rendering(device);
-
         render_target.prepare_transfer(device);
-
         render_target.submit_render(device)?;
+
+        self.next_frame();
+        assets.scenes.get_mut(&scene_handle).unwrap().next_frame();
 
         Ok(())
     }
 
+    #[allow(unused)]
+    #[inline]
+    fn add_uniform(&mut self, buffer: &GpuBuffer) -> (usize, vk::DeviceSize) {
+        let index = self.current_frame * UNIFORM_DESCRIPTOR_BUFFER_LEN + self.curr_uniform_index;
+
+        let offset = unsafe {
+            self.uniform_buffers
+                .set_uniform_buffer_unchecked(buffer, index)
+        };
+
+        self.curr_uniform_index += 1;
+
+        (index, offset)
+    }
+
+    #[allow(unused)]
+    #[inline]
+    fn add_texture(
+        &mut self,
+        texture: &VulkanImage,
+        sampler: vk::Sampler,
+    ) -> (usize, vk::DeviceSize) {
+        let index = self.current_frame * TEXTURE_DESCRIPTOR_BUFFER_LEN + self.curr_texture_index;
+
+        let offset = unsafe { self.textures.set_texture_unchecked(texture, sampler, index) };
+
+        self.curr_texture_index += 1;
+
+        (index, offset)
+    }
+
+    #[allow(unused)]
+    #[inline]
+    fn add_input_attachment(&mut self, texture: &VulkanImage) -> (usize, vk::DeviceSize) {
+        let index = self.current_frame * INPUT_ATTACHMENT_BUFFER_LEN + self.curr_input_index;
+
+        let offset = unsafe {
+            self.input_attachments
+                .set_input_attachment_unchecked(texture, index)
+        };
+
+        self.curr_input_index += 1;
+
+        (index, offset)
+    }
+
+    pub fn image_count(&self) -> u32 {
+        self.image_count
+    }
+
+    pub fn antialising(&self) -> Antialiasing {
+        self.antialiasing
+    }
+
     pub fn present_to_target(
         &mut self,
+        assets: &mut RenderAssets,
         present_target: PresentTargetHandle,
         render_target: RenderTargetHandle,
     ) -> PresentResult<()> {
@@ -256,8 +381,8 @@ impl VulkanRenderer {
 
         unsafe { device.device_wait_idle()? }
 
-        let present_target = self.present_targets.get_mut(&present_target).unwrap();
-        let render_target = self.render_targets.get_mut(&render_target).unwrap();
+        let present_target = assets.present_targets.get_mut(&present_target).unwrap();
+        let render_target = assets.render_targets.get_mut(&render_target).unwrap();
 
         let PresentData {
             cmd_buffer,
@@ -311,14 +436,8 @@ impl VulkanRenderer {
 
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
-        let device = get_device();
-
         unsafe {
-            let _ = device.device_wait_idle();
+            get_device().device_wait_idle();
         }
-
-        self.present_targets
-            .drain()
-            .for_each(|(_, mut target)| target.destroy(device));
     }
 }

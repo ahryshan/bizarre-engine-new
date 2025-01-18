@@ -46,6 +46,18 @@ pub struct GpuBuffer {
     alloc_flags: vma::AllocationCreateFlags,
 }
 
+impl std::fmt::Debug for GpuBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GpuBuffer")
+            .field("buffer", &self.buffer)
+            .field("allocation", &self.allocation)
+            .field("size", &self.size)
+            .field("buffer_usage", &self.buffer_usage)
+            .field("mem_usage", &self.mem_usage)
+            .finish()
+    }
+}
+
 impl GpuBuffer {
     pub fn staging_buffer(device: &LogicalDevice, size: vk::DeviceSize) -> BufferResult<Self> {
         Self::new(
@@ -93,8 +105,8 @@ impl GpuBuffer {
         self.size
     }
 
-    pub fn buffer(&self) -> &vk::Buffer {
-        &self.buffer
+    pub fn buffer(&self) -> vk::Buffer {
+        self.buffer
     }
 
     pub fn allocation(&self) -> &vma::Allocation {
@@ -343,7 +355,6 @@ impl GpuBuffer {
 
         let slice = unsafe {
             let ptr = device.allocator.map_memory(&mut self.allocation)? as *mut T;
-            let len = self.size as usize / size_of::<T>();
             &mut *slice_from_raw_parts_mut(ptr, len)
         };
 

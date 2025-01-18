@@ -1,5 +1,6 @@
 #![feature(slice_pattern)]
 #![feature(variant_count)]
+#![feature(trait_alias)]
 
 use ash::vk;
 

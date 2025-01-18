@@ -44,7 +44,6 @@ pub struct VulkanPipelineRequirements<'a> {
     pub vertex_attributes: &'a [vk::VertexInputAttributeDescription],
     pub samples: vk::SampleCountFlags,
     pub color_attachment_formats: &'a [vk::Format],
-    pub input_attachment_indices: &'a [u32],
     pub depth_attachment_format: vk::Format,
 }
 
@@ -162,12 +161,12 @@ impl VulkanPipeline {
             .logic_op_enable(false)
             .attachments(&color_blend_attachments);
 
-        let bindings = requirements.bindings.to_vec().into();
+        let bindings = requirements.bindings.to_vec();
 
-        let set_layouts = bindings_into_layouts(&bindings)?;
+        let set_layouts = bindings_into_layouts(&bindings, device)?;
 
         let layout = {
-            let layout_info = vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
+            let layout_info = vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts).flags(vk::PipelineLayoutCreateFlags::BUFF);
             unsafe { device.create_pipeline_layout(&layout_info, None)? }
         };
 
@@ -199,25 +198,18 @@ impl VulkanPipeline {
             != PipelineFeatureFlags::empty()
         {
             depth_stencil_info = depth_stencil_info.depth_compare_op(vk::CompareOp::LESS);
-
-            if requirements
-                .features
-                .flags
-                .contains(PipelineFeatureFlags::DEPTH_TEST)
+            if requirements.features.flags & PipelineFeatureFlags::DEPTH_TEST
+                != PipelineFeatureFlags::empty()
             {
                 depth_stencil_info = depth_stencil_info.depth_test_enable(true);
             }
-            if requirements
-                .features
-                .flags
-                .contains(PipelineFeatureFlags::DEPTH_WRITE)
+            if requirements.features.flags & PipelineFeatureFlags::DEPTH_WRITE
+                != PipelineFeatureFlags::empty()
             {
                 depth_stencil_info = depth_stencil_info.depth_write_enable(true);
             }
-            if requirements
-                .features
-                .flags
-                .contains(PipelineFeatureFlags::STENCIL_TEST)
+            if requirements.features.flags & PipelineFeatureFlags::STENCIL_TEST
+                != PipelineFeatureFlags::empty()
             {
                 depth_stencil_info = depth_stencil_info.stencil_test_enable(true);
             }
@@ -226,9 +218,6 @@ impl VulkanPipeline {
         let mut pipeline_rendering_info = vk::PipelineRenderingCreateInfo::default()
             .color_attachment_formats(requirements.color_attachment_formats)
             .depth_attachment_format(requirements.depth_attachment_format);
-
-        let mut attachment_index_info = vk::RenderingInputAttachmentIndexInfoKHR::default()
-            .color_attachment_input_indices(requirements.input_attachment_indices);
 
         let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)
@@ -242,8 +231,7 @@ impl VulkanPipeline {
             .dynamic_state(&dynamic_state_info)
             .flags(vk::PipelineCreateFlags::DESCRIPTOR_BUFFER_EXT)
             .layout(layout)
-            .push_next(&mut pipeline_rendering_info)
-            .push_next(&mut attachment_index_info);
+            .push_next(&mut pipeline_rendering_info);
 
         let pipeline_create_info = if let Some(pipeline) = base_pipeline {
             pipeline_create_info.base_pipeline_handle(pipeline)

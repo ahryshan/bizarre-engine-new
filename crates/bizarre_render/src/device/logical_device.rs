@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_char, CStr},
+    ffi::{c_char, CStr, CString},
     ops::Deref,
 };
 
@@ -10,13 +10,17 @@ use ash::{
 use bizarre_log::{core_info, core_trace};
 use thiserror::Error;
 
-use crate::{instance::VulkanInstance, present_target::SwapchainSupportInfo};
+use crate::{
+    instance::VulkanInstance, present_target::SwapchainSupportInfo, vulkan_context::get_instance,
+};
 
 use super::PhysicalDevice;
 
 const REQUIRED_EXTENSIONS: &'static [*const c_char] = &[
     ash::khr::swapchain::NAME.as_ptr(),
     ash::ext::descriptor_buffer::NAME.as_ptr(),
+    ash::khr::dynamic_rendering_local_read::NAME.as_ptr(),
+    ash::khr::shader_non_semantic_info::NAME.as_ptr(),
 ];
 
 pub struct LogicalDevice {
@@ -75,18 +79,27 @@ impl LogicalDevice {
         let mut dynamic_rendering =
             vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
 
+        let mut dynamic_rendering_local_read =
+            vk::PhysicalDeviceDynamicRenderingLocalReadFeaturesKHR::default()
+                .dynamic_rendering_local_read(true);
+
         let mut buffer_device_address =
             vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
 
         let mut descriptor_buffer =
             vk::PhysicalDeviceDescriptorBufferFeaturesEXT::default().descriptor_buffer(true);
 
+        let mut descriptor_indexing =
+            vk::PhysicalDeviceDescriptorIndexingFeatures::default().runtime_descriptor_array(true);
+
         let create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&REQUIRED_EXTENSIONS)
             .push_next(&mut sync2)
             .push_next(&mut dynamic_rendering)
+            .push_next(&mut dynamic_rendering_local_read)
             .push_next(&mut buffer_device_address)
+            .push_next(&mut descriptor_indexing)
             .push_next(&mut descriptor_buffer);
 
         let logical = unsafe { instance.create_device(*physical, &create_info, None)? };
@@ -153,6 +166,24 @@ impl LogicalDevice {
     pub(crate) fn get_buffer_address(&self, buffer: vk::Buffer) -> vk::DeviceAddress {
         let addr_info = vk::BufferDeviceAddressInfo::default().buffer(buffer);
         unsafe { self.get_buffer_device_address(&addr_info) }
+    }
+
+    pub(crate) fn set_object_debug_name(&self, object: impl vk::Handle, name: impl Into<Vec<u8>>) {
+        let instance = get_instance();
+
+        let debug_device_ext = ash::ext::debug_utils::Device::new(instance, &self.logical);
+
+        let buffer_name = CString::new(name).unwrap();
+
+        let object_name = vk::DebugUtilsObjectNameInfoEXT::default()
+            .object_name(buffer_name.as_c_str())
+            .object_handle(object);
+
+        unsafe {
+            debug_device_ext
+                .set_debug_utils_object_name(&object_name)
+                .unwrap()
+        };
     }
 }
 

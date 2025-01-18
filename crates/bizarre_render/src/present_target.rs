@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 
 use ash::{nv::shader_subgroup_partitioned, vk};
-use bizarre_core::Handle;
+use bizarre_core::{handle::IntoHandle, Handle};
 use bizarre_log::{core_info, core_trace, core_warn};
 use nalgebra_glm::UVec2;
 use thiserror::Error;
@@ -11,6 +11,7 @@ use crate::{
     image::VulkanImage,
     instance::VulkanInstance,
     render_target::{ImageRenderTarget, RenderData},
+    vulkan_context::{get_device, get_instance},
 };
 
 pub type PresentTargetHandle = Handle<PresentTarget>;
@@ -77,6 +78,7 @@ impl SwapchainSupportInfo {
 }
 
 pub struct PresentTarget {
+    window_id: usize,
     surface_loader: ash::khr::surface::Instance,
     surface: vk::SurfaceKHR,
     swapchain_loader: ash::khr::swapchain::Device,
@@ -93,15 +95,24 @@ pub struct PresentTarget {
     next_image_index: u32,
 }
 
+impl IntoHandle for PresentTarget {
+    fn into_handle(&self) -> Handle<Self> {
+        Handle::from_raw(self.window_id)
+    }
+}
+
 impl PresentTarget {
     pub(crate) unsafe fn new(
-        instance: &VulkanInstance,
-        device: &LogicalDevice,
         cmd_pool: vk::CommandPool,
+        image_count: u32,
         extent: UVec2,
         display: *mut vk::wl_display,
         surface: *mut c_void,
+        window_id: usize,
     ) -> Result<Self, vk::Result> {
+        let instance = get_instance();
+        let device = get_device();
+
         let wl_surface_loader =
             ash::khr::wayland_surface::Instance::new(&instance.entry, &instance.instance);
 
@@ -130,11 +141,11 @@ impl PresentTarget {
             }
         };
 
-        let image_count = if support.capabilities.max_image_count > 0 {
-            (support.capabilities.min_image_count + 1).min(support.capabilities.max_image_count)
-        } else {
-            support.capabilities.min_image_count + 1
-        };
+        // let image_count = if support.capabilities.max_image_count > 0 {
+        //     (support.capabilities.min_image_count + 1).min(support.capabilities.max_image_count)
+        // } else {
+        //     support.capabilities.min_image_count + 1
+        // };
 
         let (swapchain, images, image_views) = create_swapchain(
             device,
@@ -188,6 +199,7 @@ impl PresentTarget {
             present_cmd_buffers,
             image_acquired,
             image_ready,
+            window_id,
 
             next_image_index: 0,
         };
@@ -344,7 +356,9 @@ impl PresentTarget {
         self.size
     }
 
-    pub fn resize(&mut self, device: &LogicalDevice, size: UVec2) -> PresentResult<()> {
+    pub fn resize(&mut self, size: UVec2) -> PresentResult<()> {
+        let device = get_device();
+
         let extent = vk::Extent2D {
             width: size.x,
             height: size.y,
@@ -378,7 +392,9 @@ impl PresentTarget {
         Ok(())
     }
 
-    pub fn destroy(&mut self, device: &LogicalDevice) {
+    pub fn destroy(&mut self) {
+        let device = get_device();
+
         self.image_views
             .drain(..)
             .for_each(|image_view| unsafe { device.logical.destroy_image_view(image_view, None) });
@@ -396,6 +412,12 @@ impl PresentTarget {
                 .destroy_swapchain(self.swapchain, None)
         }
         unsafe { self.surface_loader.destroy_surface(self.surface, None) }
+    }
+}
+
+impl Drop for PresentTarget {
+    fn drop(&mut self) {
+        self.destroy()
     }
 }
 

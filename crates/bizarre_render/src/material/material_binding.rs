@@ -1,232 +1,110 @@
-use std::ops::{Deref, DerefMut};
+use std::collections::BTreeMap;
 
 use ash::vk;
 
-use crate::{device::LogicalDevice, shader::ShaderKind};
+use crate::{
+    shader::{ShaderStage, ShaderStageFlags, ShaderStages},
+    vulkan_context::get_device,
+};
 
-#[derive(Debug, Clone, Copy)]
-pub enum MaterialType {
-    Opaque,
-    Lighting,
-    Translucent,
-    Postprocess,
-}
-
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub enum BindingType {
-    UniformBuffer = vk::DescriptorType::UNIFORM_BUFFER.as_raw(),
-    StorageBuffer = vk::DescriptorType::STORAGE_BUFFER.as_raw(),
-    InputAttachment = vk::DescriptorType::INPUT_ATTACHMENT.as_raw(),
-    Texture = vk::DescriptorType::COMBINED_IMAGE_SAMPLER.as_raw(),
-}
-
-impl From<BindingType> for vk::DescriptorType {
-    fn from(value: BindingType) -> Self {
-        vk::DescriptorType::from_raw(value as i32)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum BindObject {
-    UniformBuffer(Option<vk::Buffer>),
-    InputAttachment(Option<vk::ImageView>),
-    StorageBuffer(Option<vk::Buffer>),
-    Texture(Option<vk::ImageView>, Option<vk::Sampler>),
-}
-
-impl From<&MaterialBinding> for BindObject {
-    fn from(value: &MaterialBinding) -> Self {
-        match value.binding_type {
-            BindingType::InputAttachment => BindObject::InputAttachment(None),
-            BindingType::UniformBuffer => BindObject::UniformBuffer(None),
-            BindingType::StorageBuffer => BindObject::StorageBuffer(None),
-            BindingType::Texture => BindObject::Texture(None, None),
-        }
-    }
-}
-
-impl From<&BindObject> for BindingType {
-    fn from(value: &BindObject) -> Self {
-        match value {
-            BindObject::UniformBuffer(..) => BindingType::UniformBuffer,
-            BindObject::InputAttachment(..) => BindingType::InputAttachment,
-            BindObject::StorageBuffer(..) => BindingType::StorageBuffer,
-            BindObject::Texture(..) => BindingType::Texture,
-        }
-    }
-}
-
-impl From<&mut BindObject> for BindingType {
-    fn from(value: &mut BindObject) -> Self {
-        (value as &BindObject).into()
-    }
-}
-
-impl From<&BindObject> for vk::DescriptorType {
-    fn from(value: &BindObject) -> Self {
-        match value {
-            BindObject::InputAttachment(..) => vk::DescriptorType::INPUT_ATTACHMENT,
-            BindObject::UniformBuffer(..) => vk::DescriptorType::UNIFORM_BUFFER,
-            BindObject::StorageBuffer(..) => vk::DescriptorType::STORAGE_BUFFER,
-            BindObject::Texture(..) => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct BindObjectSet(pub Box<[BindObject]>);
-
-impl Deref for BindObjectSet {
-    type Target = Box<[BindObject]>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for BindObjectSet {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl From<&BindingSet> for BindObjectSet {
-    fn from(value: &BindingSet) -> Self {
-        let boxed = value
-            .iter()
-            .map(|material_binding| BindObject::from(material_binding))
-            .collect::<Box<_>>();
-
-        Self(boxed)
-    }
-}
-
-impl FromIterator<BindObject> for BindObjectSet {
-    fn from_iter<T: IntoIterator<Item = BindObject>>(iter: T) -> Self {
-        Self(iter.into_iter().collect::<Box<_>>())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum MaterialBindingRate {
-    PerInstance,
-    PerFrame,
-}
-
-/// Describes a binding from the shader perspective
 #[derive(Debug, Clone)]
 pub struct MaterialBinding {
-    pub binding: u32,
     pub set: u32,
+    pub binding: u32,
+    pub descriptor_type: vk::DescriptorType,
     pub descriptor_count: u32,
-    pub shader_stage: ShaderKind,
-    pub binding_type: BindingType,
+    pub binding_rate: MaterialBindingRate,
+    pub shader_stage_flags: ShaderStageFlags,
 }
 
 impl From<&MaterialBinding> for vk::DescriptorSetLayoutBinding<'_> {
     fn from(value: &MaterialBinding) -> Self {
-        vk::DescriptorSetLayoutBinding::default()
-            .binding(value.binding)
-            .descriptor_count(value.descriptor_count)
-            .stage_flags(value.shader_stage.into())
-            .descriptor_type(value.binding_type.into())
+        vk::DescriptorSetLayoutBinding {
+            binding: value.binding,
+            descriptor_type: value.descriptor_type,
+            descriptor_count: value.descriptor_count,
+            stage_flags: value.shader_stage_flags.into(),
+            ..Default::default()
+        }
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct BindingSet(Box<[MaterialBinding]>);
-
-impl From<Vec<MaterialBinding>> for BindingSet {
-    fn from(value: Vec<MaterialBinding>) -> Self {
-        Self(value.into())
-    }
+pub const fn base_scene_bindings() -> &'static [MaterialBinding] {
+    &[
+        MaterialBinding {
+            set: 0,
+            binding: 0,
+            descriptor_count: 1,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            binding_rate: MaterialBindingRate::PerFrame,
+            shader_stage_flags: ShaderStageFlags::VERTEX,
+        },
+        MaterialBinding {
+            set: 0,
+            binding: 1,
+            descriptor_count: 1,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            binding_rate: MaterialBindingRate::PerFrame,
+            shader_stage_flags: ShaderStageFlags::VERTEX,
+        },
+    ]
 }
 
-impl From<&[MaterialBinding]> for BindingSet {
-    fn from(value: &[MaterialBinding]) -> Self {
-        Self(value.to_vec().into_boxed_slice())
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum MaterialBindingRate {
+    PerFrame,
+    Single,
 }
 
-impl Deref for BindingSet {
-    type Target = Box<[MaterialBinding]>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+#[derive(Debug, Clone)]
+pub struct MaterialBindingSet {
+    pub(crate) bindings: Vec<MaterialBinding>,
 }
 
-impl DerefMut for BindingSet {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl From<Vec<MaterialBinding>> for MaterialBindingSet {
+    fn from(mut bindings: Vec<MaterialBinding>) -> Self {
+        if bindings.is_empty() {
+            return Self { bindings };
+        }
+
+        bindings.sort_by_cached_key(|binding| {
+            (binding.set, binding.binding, binding.shader_stage_flags)
+        });
+
+        Self { bindings }
     }
-}
-
-impl FromIterator<MaterialBinding> for BindingSet {
-    fn from_iter<T: IntoIterator<Item = MaterialBinding>>(iter: T) -> Self {
-        BindingSet(iter.into_iter().collect::<Box<_>>())
-    }
-}
-
-pub fn binding_sets(bindings: &[MaterialBinding]) -> Vec<BindingSet> {
-    if bindings.is_empty() {
-        return vec![];
-    }
-
-    let (min_set, max_set) =
-        bindings
-            .iter()
-            .map(|b| b.set)
-            .fold((u32::MAX, u32::MIN), |acc, curr| {
-                let (min, max) = acc;
-                (curr.min(min), curr.max(max))
-            });
-
-    let length = (max_set - min_set) as usize + 1;
-
-    bindings
-        .iter()
-        .cloned()
-        .fold(vec![Vec::new(); length], |mut acc, curr| {
-            acc[(curr.set - min_set) as usize].push(curr);
-            acc
-        })
-        .into_iter()
-        .map(BindingSet::from)
-        .collect::<Vec<_>>()
 }
 
 pub fn bindings_into_layouts(
-    bindings: &[MaterialBinding],
-    device: &LogicalDevice,
+    binding_set: &MaterialBindingSet,
 ) -> Result<Vec<vk::DescriptorSetLayout>, vk::Result> {
-    if bindings.is_empty() {
-        return Ok(vec![]);
-    }
-    let (min_set, max_set) =
-        bindings
-            .iter()
-            .map(|b| b.set)
-            .fold((u32::MAX, u32::MIN), |acc, curr| {
-                let (min, max) = acc;
-                (curr.min(min), curr.max(max))
-            });
+    let device = get_device();
 
-    let length = (max_set - min_set) as usize + 1;
-
-    let layouts = bindings
-        .iter()
-        .fold(vec![Vec::new(); length], |mut acc, curr| {
-            acc[(curr.set - min_set) as usize].push(vk::DescriptorSetLayoutBinding::from(curr));
-            acc
-        })
-        .into_iter()
+    binding_set
+        .bindings
+        .chunk_by(|a, b| a.set == b.set)
         .map(|bindings| {
-            let create_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
-            unsafe { Ok(device.create_descriptor_set_layout(&create_info, None)?) }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            let bindings = bindings
+                .iter()
+                .map(|binding| vk::DescriptorSetLayoutBinding::from(binding))
+                .collect::<Vec<_>>();
 
-    Ok(layouts)
+            #[cfg(debug_assertions)]
+            {
+                let first_element_type = bindings[0].descriptor_type;
+                debug_assert!(
+                    bindings
+                        .iter()
+                        .all(|binding| binding.descriptor_type == first_element_type),
+                    "all bindings in a set must have the same type"
+                );
+            }
+
+            let create_info = vk::DescriptorSetLayoutCreateInfo::default()
+                .bindings(&bindings)
+                .flags(vk::DescriptorSetLayoutCreateFlags::DESCRIPTOR_BUFFER_EXT);
+
+            unsafe { device.create_descriptor_set_layout(&create_info, None) }
+        })
+        .collect::<Result<Vec<_>, _>>()
 }

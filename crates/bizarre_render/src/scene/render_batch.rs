@@ -4,7 +4,7 @@ use crate::mesh::MeshHandle;
 
 use super::render_object::RenderObjectMaterials;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct RenderBatch {
     pub mesh: MeshHandle,
     pub materials: RenderObjectMaterials,
