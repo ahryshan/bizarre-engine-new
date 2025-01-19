@@ -29,8 +29,8 @@ impl VulkanInstance {
 
         let instance = 'create_instance: {
             unsafe {
-                let mut extentions = PLATFORM_EXTENTIONS.to_vec();
-                extentions.extend_from_slice(ADDITIONAL_EXTENTIONS);
+                let mut extentions = PLATFORM_EXTENSIONS.to_vec();
+                extentions.extend_from_slice(ADDITIONAL_EXTENSIONS);
 
                 let application_info =
                     vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3);
@@ -103,13 +103,14 @@ impl Drop for VulkanInstance {
 }
 
 #[cfg(target_os = "linux")]
-const PLATFORM_EXTENTIONS: &'static [*const std::ffi::c_char] = &[
+const PLATFORM_EXTENSIONS: &'static [*const std::ffi::c_char] = &[
     vk::KHR_SURFACE_NAME.as_ptr(),
     vk::KHR_WAYLAND_SURFACE_NAME.as_ptr(),
+    vk::KHR_XLIB_SURFACE_NAME.as_ptr(),
 ];
 
 #[cfg(debug_assertions)]
-const ADDITIONAL_EXTENTIONS: &'static [*const std::ffi::c_char] =
+const ADDITIONAL_EXTENSIONS: &'static [*const std::ffi::c_char] =
     &[vk::EXT_DEBUG_UTILS_NAME.as_ptr()];
 
 #[cfg(debug_assertions)]

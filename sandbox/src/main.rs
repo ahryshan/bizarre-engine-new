@@ -5,7 +5,7 @@ use anyhow::Result;
 use bizarre_engine::{
     app::AppBuilder,
     ecs::{system::schedule::Schedule, world::ecs_module::EcsModule},
-    ecs_modules::{InputModule, WindowModule},
+    ecs_modules::{sdl_module::SdlModule, InputModule, WindowModule},
     event::Events,
     log::trace,
     prelude::{Res, ResMut, *},
@@ -21,7 +21,8 @@ use bizarre_engine::{
         },
         submitter::RenderPackage,
     },
-    window::{window_events::WindowEvent, window_manager::WindowManager, WindowCreateInfo},
+    sdl::window::{WindowCreateInfo, WindowPosition, Windows},
+    window::{window_events::WindowEvent, window_manager::WindowManager},
 };
 
 use nalgebra_glm::{look_at, perspective, perspective_fov, radians, Mat4, UVec2, Vec1, Vec3};
@@ -38,7 +39,7 @@ impl EcsModule for RenderModule {
     fn apply(self, world: &mut bizarre_engine::ecs::world::World) {
         let renderer = VulkanRenderer::new().unwrap();
         let main_window = world
-            .resource_mut::<WindowManager>()
+            .resource_mut::<Windows>()
             .unwrap()
             .get_main_window()
             .unwrap();
@@ -46,20 +47,19 @@ impl EcsModule for RenderModule {
         let mut assets = RenderAssets::new();
 
         let present_target_handle =
-            assets.create_present_target(&main_window, renderer.image_count());
+            assets.create_present_target2(&main_window, renderer.image_count());
 
-        let (width, height) = {
-            let size = main_window.size();
-            (size.x, size.y)
-        };
+        let (width, height) = main_window.size();
 
         let image_count = renderer.image_count();
 
-        let render_target = assets.create_swapchain_render_target(
-            main_window.size(),
-            image_count,
-            renderer.antialising(),
-        );
+        let extent = {
+            let (x, y) = main_window.size();
+            UVec2::new(x, y)
+        };
+
+        let render_target =
+            assets.create_swapchain_render_target(extent, image_count, renderer.antialising());
 
         let mesh = assets.load_mesh("assets/meshes/cube.obj");
 
@@ -148,9 +148,10 @@ fn main() -> Result<()> {
         .with_name("Bizarre Engine")
         .with_module(InputModule)
         .with_module(
-            WindowModule::new().with_main_window(WindowCreateInfo::normal_window(
+            SdlModule::new().with_main_window(WindowCreateInfo::normal_window(
                 "Bizarre Window".into(),
                 UVec2::new(800, 600),
+                WindowPosition::Centered,
             )),
         )
         .with_module(RenderModule)

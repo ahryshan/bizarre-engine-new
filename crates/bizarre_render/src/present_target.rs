@@ -102,25 +102,15 @@ impl IntoHandle for PresentTarget {
 }
 
 impl PresentTarget {
-    pub(crate) unsafe fn new(
+    pub(crate) fn new2(
         cmd_pool: vk::CommandPool,
         image_count: u32,
         extent: UVec2,
-        display: *mut vk::wl_display,
-        surface: *mut c_void,
+        surface: vk::SurfaceKHR,
         window_id: usize,
     ) -> Result<Self, vk::Result> {
         let instance = get_instance();
         let device = get_device();
-
-        let wl_surface_loader =
-            ash::khr::wayland_surface::Instance::new(&instance.entry, &instance.instance);
-
-        let create_info = vk::WaylandSurfaceCreateInfoKHR::default()
-            .display(display)
-            .surface(surface);
-
-        let surface = wl_surface_loader.create_wayland_surface(&create_info, None)?;
 
         let swapchain_loader =
             ash::khr::swapchain::Device::new(&instance.instance, &device.logical);
@@ -167,14 +157,14 @@ impl PresentTarget {
                 .command_buffer_count(images.len() as u32)
                 .level(vk::CommandBufferLevel::PRIMARY);
 
-            device.allocate_command_buffers(&allocate_info)?
+            unsafe { device.allocate_command_buffers(&allocate_info) }?
         };
 
         let image_acquired = images
             .iter()
             .map(|_| {
                 let create_info = vk::SemaphoreCreateInfo::default();
-                device.create_semaphore(&create_info, None)
+                unsafe { device.create_semaphore(&create_info, None) }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -182,7 +172,7 @@ impl PresentTarget {
             .iter()
             .map(|_| {
                 let create_info = vk::SemaphoreCreateInfo::default();
-                device.create_semaphore(&create_info, None)
+                unsafe { device.create_semaphore(&create_info, None) }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -205,6 +195,29 @@ impl PresentTarget {
         };
 
         Ok(present_target)
+    }
+
+    pub(crate) unsafe fn new(
+        cmd_pool: vk::CommandPool,
+        image_count: u32,
+        extent: UVec2,
+        display: *mut vk::wl_display,
+        surface: *mut c_void,
+        window_id: usize,
+    ) -> Result<Self, vk::Result> {
+        let instance = get_instance();
+        let device = get_device();
+
+        let wl_surface_loader =
+            ash::khr::wayland_surface::Instance::new(&instance.entry, &instance.instance);
+
+        let create_info = vk::WaylandSurfaceCreateInfoKHR::default()
+            .display(display)
+            .surface(surface);
+
+        let surface = wl_surface_loader.create_wayland_surface(&create_info, None)?;
+
+        Self::new2(cmd_pool, image_count, extent, surface, window_id)
     }
 
     pub fn image_count(&self) -> u32 {
@@ -456,6 +469,16 @@ fn create_swapchain(
     surface: vk::SurfaceKHR,
     old_swapchain: Option<vk::SwapchainKHR>,
 ) -> Result<(vk::SwapchainKHR, Vec<vk::Image>, Vec<vk::ImageView>), vk::Result> {
+    let _surface_capabilities = {
+        let instance = get_instance();
+        let instance_ext = ash::khr::surface::Instance::new(&instance.entry, &instance.instance);
+
+        unsafe {
+            instance_ext
+                .get_physical_device_surface_capabilities(get_device().physical.device, surface)
+        }
+    };
+
     let create_info = vk::SwapchainCreateInfoKHR::default()
         .surface(surface)
         .image_array_layers(1)

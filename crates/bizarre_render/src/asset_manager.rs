@@ -2,7 +2,7 @@ use std::{collections::HashMap, ffi::c_void, path::Path};
 
 use std::fmt::Debug;
 
-use ash::vk;
+use ash::vk::{self, Handle as _};
 use bizarre_core::{
     handle::{DenseHandleStrategy, HandlePlacement, HandleStrategy, SparseHandleStrategy},
     Handle,
@@ -145,6 +145,30 @@ impl RenderAssets {
     {
         let mesh = Mesh::load_from_obj(path);
         self.meshes.insert(mesh)
+    }
+
+    pub fn create_present_target2(
+        &mut self,
+        window: &bizarre_sdl::window::Window,
+        image_count: u32,
+    ) -> PresentTargetHandle {
+        let instance_handle = get_instance().handle().as_raw() as usize;
+        let surface = window.vulkan_create_surface(instance_handle).unwrap();
+        let surface = vk::SurfaceKHR::from_raw(surface);
+
+        let (width, height) = window.size();
+        let window_size = UVec2::new(width, height);
+
+        let present_target = PresentTarget::new2(
+            get_device().cmd_pool,
+            image_count,
+            window_size,
+            surface,
+            window.id() as usize,
+        )
+        .unwrap();
+
+        self.present_targets.insert(present_target)
     }
 
     pub fn create_present_target(

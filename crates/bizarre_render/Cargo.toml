@@ -17,6 +17,7 @@ ash = { version = "0.38.0", features = ["default", "linked"] }
 shaderc = "0.8.3"
 vk-mem = "0.4.0"
 tobj = "4.0.2"
+bizarre_sdl = { version = "0.1.0", path = "../bizarre_sdl" }
 
 [features]
 default = ["wayland"]

@@ -5,7 +5,7 @@ use std::{
 
 use ash::{
     ext::memory_priority,
-    vk::{self, PhysicalDeviceType},
+    vk::{self, Handle, PhysicalDeviceType},
 };
 use bizarre_log::{core_info, core_trace};
 use thiserror::Error;
@@ -260,14 +260,15 @@ fn find_best_physical_device(
     let surface_loader =
         ash::khr::wayland_surface::Instance::new(&instance.entry, &instance.instance);
 
-    let test_surface = {
-        let wl_surface = bizarre_window::get_wayland_test_surface_ptr() as _;
+    let (test_window, test_surface) = {
+        let window = bizarre_sdl::window::create_test_window();
+        let surface = window
+            .vulkan_create_surface(instance.handle().as_raw() as usize)
+            .unwrap();
 
-        let create_info = vk::WaylandSurfaceCreateInfoKHR::default()
-            .display(display)
-            .surface(wl_surface);
+        let surface = vk::SurfaceKHR::from_raw(surface);
 
-        unsafe { surface_loader.create_wayland_surface(&create_info, None) }.unwrap()
+        (window, surface)
     };
 
     let mut rating = pdevices
@@ -290,6 +291,8 @@ fn find_best_physical_device(
         let surface_loader = ash::khr::surface::Instance::new(&instance.entry, &instance.instance);
         surface_loader.destroy_surface(test_surface, None);
     };
+
+    drop(test_window);
 
     if rating.is_empty() {
         return None;

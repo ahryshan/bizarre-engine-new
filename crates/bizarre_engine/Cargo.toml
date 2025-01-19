@@ -12,6 +12,9 @@ bizarre_window = { version = "0.1.0", path = "../bizarre_window" }
 bizarre_input = {version = "0.1.0", path = "../bizarre_input"}
 bizarre_log = {version = "0.1.0", path = "../bizarre_log"}
 bizarre_render = { version = "0.1.0", path = "../bizarre_render" }
+bizarre_sdl = { version = "0.1.0", path = "../bizarre_sdl" }
+
+nalgebra-glm = { workspace = true }
 
 [features]
 default = []
