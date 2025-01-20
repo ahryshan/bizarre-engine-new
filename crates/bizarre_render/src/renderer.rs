@@ -3,6 +3,7 @@ use std::ffi::{CStr, CString};
 
 use ash::vk;
 use bizarre_log::{core_info, core_trace};
+use nalgebra_glm::UVec2;
 use thiserror::Error;
 
 use bizarre_core::Handle;
@@ -59,6 +60,8 @@ pub enum RenderError {
     PipelineError(#[from] PipelineError),
     #[error("Invalid render target")]
     InvalidRenderTarget,
+    #[error("Render must be skipped")]
+    RenderSkipped,
 }
 #[derive(Error, Debug)]
 pub enum RendererCreateError {
@@ -148,8 +151,13 @@ impl VulkanRenderer {
         &mut self,
         assets: &mut RenderAssets,
         render_target: RenderTargetHandle,
+        render_extent: UVec2,
         render_package: RenderPackage,
     ) -> RenderResult<()> {
+        if render_extent.x == 0 || render_extent.y == 0 {
+            return Err(RenderError::RenderSkipped);
+        }
+
         let RenderPackage {
             scene: scene_handle,
             pov,
@@ -207,6 +215,8 @@ impl VulkanRenderer {
             .render_targets
             .get_mut(&render_target)
             .ok_or(RenderError::InvalidRenderTarget)?;
+
+        render_target.resize(render_extent);
 
         render_target.begin_rendering(device)?;
 
@@ -390,9 +400,8 @@ impl VulkanRenderer {
             image_acquired,
             image_ready,
             image_index: index,
-        } = present_target
-            .record_present(device, render_target.output_image())
-            .unwrap();
+            image_ready_fence,
+        } = present_target.record_present(device, render_target.output_image())?;
 
         let swapchains = [swapchain];
         let indices = [index];
@@ -415,7 +424,9 @@ impl VulkanRenderer {
 
             let submits = [submit_info];
 
-            device.queue_submit(device.present_queue, &submits, vk::Fence::null())?;
+            device.reset_fences(&[image_ready_fence])?;
+
+            device.queue_submit(device.present_queue, &submits, image_ready_fence)?;
         };
 
         let present_info = vk::PresentInfoKHR::default()

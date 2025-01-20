@@ -156,13 +156,9 @@ impl RenderAssets {
         let surface = window.vulkan_create_surface(instance_handle).unwrap();
         let surface = vk::SurfaceKHR::from_raw(surface);
 
-        let (width, height) = window.size();
-        let window_size = UVec2::new(width, height);
-
         let present_target = PresentTarget::new2(
             get_device().cmd_pool,
             image_count,
-            window_size,
             surface,
             window.id() as usize,
         )

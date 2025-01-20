@@ -1,16 +1,20 @@
 use bizarre_app::app_event::AppEvent;
 use bizarre_core::Handle;
-use bizarre_ecs::{prelude::ResMut, system::schedule::Schedule, world::ecs_module::EcsModule};
+use bizarre_ecs::{
+    prelude::{Res, ResMut},
+    system::schedule::Schedule,
+    world::ecs_module::EcsModule,
+};
 use bizarre_event::EventQueue;
+use bizarre_log::core_info;
 use bizarre_sdl::{
     context::{with_sdl_context, with_sdl_events},
-    window::{WindowCreateInfo, WindowHandle, Windows},
+    input::InputEvent,
+    window::{try_handle_sdl_event, WindowCreateInfo, WindowEvent, WindowHandle, Windows},
 };
 
 use bizarre_sdl::sdl;
 
-use bizarre_window::window_events::WindowEvent;
-use nalgebra_glm::UVec2;
 use sdl::event::Event as SdlEvent;
 
 pub struct SdlModule {
@@ -51,31 +55,24 @@ impl EcsModule for SdlModule {
     }
 }
 
-fn handle_sdl_events(mut event_queue: ResMut<EventQueue>) {
+fn handle_sdl_events(windows: Res<Windows>, mut event_queue: ResMut<EventQueue>) {
     with_sdl_context(|sdl| {
         sdl.event_pump()
             .unwrap()
             .poll_iter()
-            .for_each(|event| try_push_event(&mut event_queue, event));
+            .for_each(|event| try_push_event(&windows, &mut event_queue, &event));
     })
 }
 
-fn try_push_event(event_queue: &mut EventQueue, event: SdlEvent) {
-    use sdl::event::WindowEvent as SdlWindowEvent;
+fn try_push_event(windows: &Windows, event_queue: &mut EventQueue, event: &SdlEvent) {
+    if let Some(event) = try_handle_sdl_event(windows, event) {
+        if let WindowEvent::MainWindowCloseRequested(_) = event {
+            event_queue.push_event(AppEvent::CloseRequested);
+        }
+        event_queue.push_event(event)
+    }
 
-    match event {
-        SdlEvent::Quit { .. } => event_queue.push_event(AppEvent::CloseRequested),
-        SdlEvent::Window {
-            window_id,
-            win_event,
-            ..
-        } => match win_event {
-            SdlWindowEvent::Resized(width, height) => event_queue.push_event(WindowEvent::Resize {
-                handle: Handle::<bizarre_window::Window>::from_raw(window_id as usize),
-                size: UVec2::new(width as u32, height as u32),
-            }),
-            _ => {}
-        },
-        _ => {}
+    if let Some(event) = InputEvent::try_from_sdl(event) {
+        event_queue.push_event(event)
     }
 }

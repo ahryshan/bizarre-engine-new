@@ -2,15 +2,20 @@ use std::collections::BTreeMap;
 
 use bizarre_core::Handle;
 use bizarre_ecs::prelude::Resource;
+use nalgebra_glm::IVec2;
+use nalgebra_glm::UVec2;
 
 use crate::context::with_sdl_video;
 
-mod create_info;
+pub mod create_info;
+pub mod window_event;
 
 pub use sdl::video::Window;
 
 pub use create_info::WindowCreateInfo;
 pub use create_info::WindowPosition;
+pub use window_event::WindowEvent;
+
 pub type WindowHandle = Handle<Window>;
 
 #[derive(Default, Resource)]
@@ -52,6 +57,49 @@ impl Windows {
 
     pub fn get_main_window(&self) -> Option<&Window> {
         self.windows.get(self.main_window.as_ref()?)
+    }
+}
+
+pub fn try_handle_sdl_event(windows: &Windows, event: &sdl::event::Event) -> Option<WindowEvent> {
+    match event {
+        sdl::event::Event::Window {
+            window_id,
+            win_event,
+            ..
+        } => {
+            let handle = WindowHandle::from_raw(*window_id);
+            match win_event {
+                sdl::event::WindowEvent::Shown => Some(WindowEvent::Shown(handle)),
+                sdl::event::WindowEvent::Hidden => Some(WindowEvent::Hidden(handle)),
+                sdl::event::WindowEvent::Exposed => Some(WindowEvent::Exposed(handle)),
+                sdl::event::WindowEvent::Moved(x, y) => Some(WindowEvent::Moved {
+                    handle,
+                    pos: IVec2::new(*x, *y),
+                }),
+                sdl::event::WindowEvent::SizeChanged(w, h) => Some(WindowEvent::Resized {
+                    handle,
+                    size: UVec2::new(*w as u32, *h as u32),
+                }),
+                sdl::event::WindowEvent::Minimized => Some(WindowEvent::Minimized(handle)),
+                sdl::event::WindowEvent::Maximized => Some(WindowEvent::Maximized(handle)),
+                sdl::event::WindowEvent::Restored => Some(WindowEvent::Restored(handle)),
+                sdl::event::WindowEvent::Enter => Some(WindowEvent::MouseEnter(handle)),
+                sdl::event::WindowEvent::Leave => Some(WindowEvent::MouseLeave(handle)),
+                sdl::event::WindowEvent::FocusGained => {
+                    Some(WindowEvent::KeyboardFocusGained(handle))
+                }
+                sdl::event::WindowEvent::FocusLost => Some(WindowEvent::KeyboardFocusLost(handle)),
+                sdl::event::WindowEvent::Close => {
+                    if Some(handle) == windows.main_window {
+                        Some(WindowEvent::MainWindowCloseRequested(handle))
+                    } else {
+                        Some(WindowEvent::CloseRequested(handle))
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 

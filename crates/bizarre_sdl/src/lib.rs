@@ -1,3 +1,4 @@
+pub mod input;
 pub mod window;
 
 pub extern crate sdl2 as sdl;
