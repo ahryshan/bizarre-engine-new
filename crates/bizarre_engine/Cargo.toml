@@ -8,8 +8,6 @@ bizarre_app = { version = "0.1.0", path = "../bizarre_app" }
 bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
 bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
 bizarre_event = { version = "0.1.0", path = "../bizarre_event" }
-bizarre_window = { version = "0.1.0", path = "../bizarre_window" }
-bizarre_input = {version = "0.1.0", path = "../bizarre_input"}
 bizarre_log = {version = "0.1.0", path = "../bizarre_log"}
 bizarre_render = { version = "0.1.0", path = "../bizarre_render" }
 bizarre_sdl = { version = "0.1.0", path = "../bizarre_sdl" }
@@ -18,9 +16,3 @@ nalgebra-glm = { workspace = true }
 
 [features]
 default = []
-
-[target.'cfg(target_os = "linux")'.features]
-default = ["wayland", "x11"]
-
-wayland = ["bizarre_window/wayland", "bizarre_render/wayland"]
-x11 = ["bizarre_window/x11"]

@@ -254,11 +254,7 @@ fn find_best_physical_device(
 ) -> Option<(vk::PhysicalDevice, QueueFamilies)> {
     let pdevices = unsafe { instance.enumerate_physical_devices() }.ok()?;
 
-    let display = bizarre_window::get_wayland_display_ptr() as *mut vk::wl_display;
-    let display = unsafe { &mut *display };
-
-    let surface_loader =
-        ash::khr::wayland_surface::Instance::new(&instance.entry, &instance.instance);
+    let surface_loader = ash::khr::surface::Instance::new(&instance.entry, &instance.instance);
 
     let (test_window, test_surface) = {
         let window = bizarre_sdl::window::create_test_window();
@@ -273,7 +269,7 @@ fn find_best_physical_device(
 
     let mut rating = pdevices
         .iter()
-        .map(|dev| rate_pdevice(instance, *dev, display, &surface_loader, test_surface))
+        .map(|dev| rate_pdevice(instance, *dev, &surface_loader, test_surface))
         .filter_map(|rating| {
             if let Some((rate, ..)) = rating {
                 if rate > 0 {
@@ -309,8 +305,7 @@ fn find_best_physical_device(
 fn rate_pdevice(
     instance: &VulkanInstance,
     dev: vk::PhysicalDevice,
-    display: &mut vk::wl_display,
-    surface_loader: &ash::khr::wayland_surface::Instance,
+    surface_loader: &ash::khr::surface::Instance,
     test_surface: vk::SurfaceKHR,
 ) -> Option<(u64, vk::PhysicalDevice, QueueFamilies)> {
     let props = unsafe { instance.get_physical_device_properties(dev) };
@@ -321,7 +316,7 @@ fn rate_pdevice(
     }
 
     let queue_families = if let Some(queue_famies) =
-        find_queue_families(instance, dev, display, surface_loader).try_build()
+        find_queue_families(instance, dev, test_surface, surface_loader).try_build()
     {
         queue_famies
     } else {
@@ -398,8 +393,8 @@ fn get_pdevice_name(instance: &VulkanInstance, dev: vk::PhysicalDevice) -> Strin
 fn find_queue_families(
     instance: &VulkanInstance,
     dev: vk::PhysicalDevice,
-    display: &mut vk::wl_display,
-    surface_loader: &ash::khr::wayland_surface::Instance,
+    test_surface: vk::SurfaceKHR,
+    surface_loader: &ash::khr::surface::Instance,
 ) -> QueueFamiliesBuilder {
     let families = unsafe { instance.get_physical_device_queue_family_properties(dev) };
 
@@ -413,7 +408,7 @@ fn find_queue_families(
             result.compute = Some(i as u32);
         }
 
-        if query_present_support(surface_loader, display, dev, i as u32) {
+        if query_present_support(surface_loader, test_surface, dev, i as u32) {
             result.present = Some(i as u32);
         }
 
@@ -426,13 +421,15 @@ fn find_queue_families(
 }
 
 fn query_present_support(
-    surface_loader: &ash::khr::wayland_surface::Instance,
-    display: &mut vk::wl_display,
+    surface_loader: &ash::khr::surface::Instance,
+    surface: vk::SurfaceKHR,
     dev: vk::PhysicalDevice,
     queue_index: u32,
 ) -> bool {
     unsafe {
-        surface_loader.get_physical_device_wayland_presentation_support(dev, queue_index, display)
+        surface_loader
+            .get_physical_device_surface_support(dev, queue_index, surface)
+            .unwrap()
     }
 }
 

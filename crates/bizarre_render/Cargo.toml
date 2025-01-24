@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 bizarre_log = { version = "0.1.0", path = "../bizarre_log" }
-bizarre_window = { version = "0.1.0", path = "../bizarre_window" }
 bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
 bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
 

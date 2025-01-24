@@ -9,7 +9,6 @@ use bizarre_core::{
 };
 use bizarre_ecs::prelude::Resource;
 use bizarre_log::core_info;
-use bizarre_window::Window;
 use nalgebra_glm::UVec2;
 
 use crate::antialiasing::Antialiasing;
@@ -165,33 +164,6 @@ impl RenderAssets {
         .unwrap();
 
         self.present_targets.insert(present_target)
-    }
-
-    pub fn create_present_target(
-        &mut self,
-        window: &Window,
-        image_count: u32,
-    ) -> PresentTargetHandle {
-        let device = get_device();
-
-        let data = unsafe {
-            let display = bizarre_window::get_wayland_display_ptr() as *mut vk::wl_display;
-            let surface = window.raw_window_ptr() as *mut c_void;
-
-            PresentTarget::new(
-                device.cmd_pool,
-                image_count,
-                window.size(),
-                display,
-                surface,
-                window.handle().as_raw(),
-            )
-            .unwrap()
-        };
-
-        let handle = self.present_targets.insert(data);
-
-        handle
     }
 
     pub fn present_target_mut(

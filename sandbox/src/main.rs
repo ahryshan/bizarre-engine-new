@@ -5,9 +5,8 @@ use anyhow::Result;
 use bizarre_engine::{
     app::AppBuilder,
     ecs::{system::schedule::Schedule, world::ecs_module::EcsModule},
-    ecs_modules::{sdl_module::SdlModule, InputModule, WindowModule},
+    ecs_modules::sdl_module::SdlModule,
     event::Events,
-    log::{info, trace},
     prelude::{Res, ResMut, *},
     render::{
         asset_manager::RenderAssets,
@@ -15,22 +14,13 @@ use bizarre_engine::{
         present_target::{PresentError, PresentTargetHandle},
         render_target::RenderTargetHandle,
         renderer::{RenderError, VulkanRenderer},
-        scene::{
-            render_object::{RenderObject, RenderObjectFlags, RenderObjectMaterials},
-            InstanceData, SceneHandle, SceneUniform,
-        },
+        scene::{SceneHandle, SceneUniform},
         submitter::RenderPackage,
     },
-    sdl::{
-        input::InputEvent,
-        window::{WindowCreateInfo, WindowEvent, WindowPosition, Windows},
-    },
-    window::window_manager::WindowManager,
+    sdl::window::{WindowCreateInfo, WindowEvent, WindowPosition, Windows},
 };
 
-use nalgebra_glm::{
-    look_at, perspective, perspective_fov, radians, IVec2, Mat4, UVec2, Vec1, Vec3,
-};
+use nalgebra_glm::{look_at, perspective, Mat4, UVec2, Vec3};
 use sandbox_module::SandboxModule;
 
 mod sandbox_module;
@@ -203,7 +193,6 @@ fn render(
 fn main() -> Result<()> {
     AppBuilder::default()
         .with_name("Bizarre Engine")
-        .with_module(InputModule)
         .with_module(
             SdlModule::new().with_main_window(WindowCreateInfo::normal_window(
                 "Bizarre Window".into(),
