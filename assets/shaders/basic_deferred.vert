@@ -14,8 +14,8 @@ layout(set = 0, binding = 0) uniform SceneUniform {
 } scene_ubo;
 
 layout(set = 0, binding = 1) uniform InstanceTransformsUbo {
-    mat4 transform;
-} instance_transforms_ubo[];
+    mat4 transform[128];
+} instance_transforms_ubo;
 
 mat4 view = {
     {1.0, 0.0, -0.0, 0.0},
@@ -32,7 +32,8 @@ mat4 projection = {
 };
 
 void main() {
-    mat4 instance_transform = instance_transforms_ubo[gl_InstanceIndex].transform;
+    // mat4 instance_transform = instance_transforms_ubo[gl_InstanceIndex].transform;
+    mat4 instance_transform = instance_transforms_ubo.transform[gl_InstanceIndex];
 
     vec4 pos = scene_ubo.projection * scene_ubo.view * instance_transform * vec4(in_position, 1.0);
     gl_Position = pos;

@@ -57,7 +57,7 @@ pub struct SceneUniform {
 }
 
 #[repr(C, align(4))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InstanceData {
     pub transform: Mat4,
 }

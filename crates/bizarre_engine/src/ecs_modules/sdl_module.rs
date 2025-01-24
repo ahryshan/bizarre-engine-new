@@ -51,11 +51,11 @@ impl EcsModule for SdlModule {
         }
 
         world.insert_resource(windows);
-        world.add_systems(Schedule::Preupdate, handle_sdl_events);
+        world.add_systems(Schedule::Preupdate, push_sdl_events);
     }
 }
 
-fn handle_sdl_events(windows: Res<Windows>, mut event_queue: ResMut<EventQueue>) {
+fn push_sdl_events(windows: Res<Windows>, mut event_queue: ResMut<EventQueue>) {
     with_sdl_context(|sdl| {
         sdl.event_pump()
             .unwrap()

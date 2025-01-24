@@ -77,22 +77,11 @@ impl EcsModule for RenderModule {
         let material = assets.insert_material(basic_deferred());
         let (instance_handle, _) = assets.create_material_instance(material).unwrap();
 
-        let render_object = RenderObject {
-            flags: RenderObjectFlags::empty(),
-            materials: RenderObjectMaterials::new(instance_handle),
-            mesh,
-            instance_data: InstanceData {
-                transform: Mat4::identity(),
-            },
-        };
-
         let scene_handle = assets.create_scene(image_count);
         let scene = assets.scene_mut(&scene_handle).unwrap();
 
-        let _ = scene.add_object(render_object);
-
         let view = look_at(
-            &Vec3::new(3.0, 2.0, 10.0),
+            &Vec3::new(3.0, 5.0, 20.0),
             &Vec3::zeros(),
             &Vec3::new(0.0, 1.0, 0.0),
         );
@@ -136,7 +125,6 @@ fn render(
 
     if let Some(window_events) = window_events.as_ref() {
         for event in window_events.iter() {
-            info!("{event:?}");
             match event {
                 WindowEvent::Resized { size, .. } if size.x == 0 || size.y == 0 => {
                     *skip_render = true
