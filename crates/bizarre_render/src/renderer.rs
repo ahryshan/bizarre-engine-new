@@ -171,8 +171,9 @@ impl VulkanRenderer {
         scene.sync_frame_data(&assets.meshes);
 
         let (indirect_buffer, indirect_iter) = scene.indirect_draw_iterator();
-        let (_, scene_ubo_offset) = self.add_uniform(scene.scene_ubo());
-        self.add_uniform(scene.instance_data_ubo());
+        let (_, scene_ubo_offset) =
+            self.add_uniform(scene.scene_ubo(), 0, scene.scene_ubo().size());
+
         let vertex_buffer = scene.vertex_buffer();
         let index_buffer = scene.index_buffer();
 
@@ -182,7 +183,9 @@ impl VulkanRenderer {
             inst_handle: MaterialInstanceHandle,
             pipeline: vk::Pipeline,
             pipeline_layout: vk::PipelineLayout,
-            offset: u64,
+            indirect_offset: u64,
+            batch_offset: u64,
+            batch_range: u64,
             count: u32,
         }
 
@@ -191,8 +194,10 @@ impl VulkanRenderer {
             .filter_map(
                 |IndirectIterItem {
                      materials,
-                     offset,
+                     indirect_offset,
                      count,
+                     batch_offset,
+                     batch_range,
                  }| {
                     let instance_handle = materials[SceneObjectPass::Deferred]?;
                     let (material, instance) = assets.material_with_instance(&instance_handle)?;
@@ -204,8 +209,10 @@ impl VulkanRenderer {
                         inst_handle: instance_handle,
                         pipeline: pipeline.pipeline,
                         pipeline_layout: pipeline.layout,
-                        offset,
+                        indirect_offset,
                         count,
+                        batch_offset,
+                        batch_range,
                     })
                 },
             )
@@ -232,15 +239,34 @@ impl VulkanRenderer {
 
         let db_device_ext = descriptor_buffer::device_ext();
 
+        let bind_info = [self.uniform_buffers.binding_info()];
+        unsafe { db_device_ext.cmd_bind_descriptor_buffers(cmd_buffer, &bind_info) };
+
         for DrawItem {
             mat_handle,
             inst_handle,
             pipeline,
             pipeline_layout,
-            offset,
+            indirect_offset: offset,
             count,
+            batch_offset,
+            batch_range,
         } in deferred_indirects
         {
+            let (_, instance_data_offset) =
+                self.add_uniform(scene.instance_data_ubo(), batch_offset, batch_range);
+
+            unsafe {
+                db_device_ext.cmd_set_descriptor_buffer_offsets(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipeline_layout,
+                    0,
+                    &[0, 0],
+                    &[scene_ubo_offset, instance_data_offset],
+                );
+            }
+
             let mat_rebind = bound_mat != mat_handle;
             let inst_rebind = mat_rebind || bound_inst != inst_handle;
 
@@ -253,21 +279,6 @@ impl VulkanRenderer {
             }
 
             if inst_rebind {
-                let bind_info = [self.uniform_buffers.binding_info()];
-
-                unsafe {
-                    db_device_ext.cmd_bind_descriptor_buffers(cmd_buffer, &bind_info);
-
-                    db_device_ext.cmd_set_descriptor_buffer_offsets(
-                        cmd_buffer,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipeline_layout,
-                        0,
-                        &[0],
-                        &[scene_ubo_offset],
-                    );
-                }
-
                 bound_inst = inst_handle;
             }
 
@@ -329,12 +340,21 @@ impl VulkanRenderer {
 
     #[allow(unused)]
     #[inline]
-    fn add_uniform(&mut self, buffer: &GpuBuffer) -> (usize, vk::DeviceSize) {
+    fn add_uniform(
+        &mut self,
+        buffer: &GpuBuffer,
+        buffer_offset: vk::DeviceSize,
+        buffer_range: vk::DeviceSize,
+    ) -> (usize, vk::DeviceSize) {
         let index = self.current_frame * UNIFORM_DESCRIPTOR_BUFFER_LEN + self.curr_uniform_index;
 
         let offset = unsafe {
-            self.uniform_buffers
-                .set_uniform_buffer_unchecked(buffer, index)
+            self.uniform_buffers.set_uniform_buffer_unchecked(
+                buffer,
+                buffer_offset,
+                buffer_range,
+                index,
+            )
         };
 
         self.curr_uniform_index += 1;

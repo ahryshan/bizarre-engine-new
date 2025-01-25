@@ -10,9 +10,12 @@ use bizarre_engine::{
         material::material_instance::MaterialInstanceHandle,
         mesh::MeshHandle,
         scene::{
-            render_object::{RenderObject, RenderObjectFlags, RenderObjectMaterials},
+            render_object::{
+                RenderObject, RenderObjectFlags, RenderObjectMaterials, RenderObjectMeta,
+            },
             InstanceData, RenderObjectId,
         },
+        uniform_block_def,
     },
     sdl::input::{InputEvent, InputState, Scancode},
 };
@@ -73,21 +76,29 @@ fn show_input_state(input_state: Res<InputState>) {
 fn setup_cubes(mut assets: ResMut<RenderAssets>, scene_handle: Res<MainScene>, mut cmd: Commands) {
     let scene = assets.scene_mut(&scene_handle.0).unwrap();
 
-    for x in -3..3 {
-        for z in -3..3 {
+    for x in -3i32..3i32 {
+        for z in -3i32..3i32 {
             let transform = Transform {
                 translation: Vec3::new(x as f32 * 3.5, 0.0, z as f32 * 3.5),
                 scale: Vec3::new(1.0, 1.0, 1.0),
                 ..Default::default()
             };
-            let obj_id = scene.add_object(RenderObject {
+
+            let materials = RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(1usize));
+
+            let meta = RenderObjectMeta {
                 flags: RenderObjectFlags::empty(),
                 materials: RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(1usize)),
                 mesh: MeshHandle::from_raw(1usize),
-                instance_data: InstanceData {
-                    transform: transform.get_transform(),
-                },
-            });
+            };
+
+            let instance_data = CubeInstanceData {
+                transform: transform.get_transform(),
+                color: COLORS[(x + z) as usize % 3],
+            };
+
+            let render_object = RenderObject::new(meta, instance_data);
+            let obj_id = scene.add_object(render_object);
 
             cmd.spawn(Cube {
                 transform,
@@ -103,7 +114,7 @@ fn update_cubes(
     scene_handle: Res<MainScene>,
     cubes: Query<(&mut Transform, &RenderObjectId)>,
 ) {
-    const ROTATION_SPEED_DEG: f32 = 90.0;
+    const ROTATION_SPEED_DEG: f32 = 180.0;
     let elapsed = last_render.elapsed();
     *last_render = Instant::now();
 
@@ -113,9 +124,23 @@ fn update_cubes(
         transform.rotation.y += ROTATION_SPEED_DEG * elapsed.as_secs_f32();
         scene.update_object(
             *id,
-            InstanceData {
+            CubeInstanceData {
                 transform: transform.get_transform(),
+                color: COLORS[id.inner() % 3],
             },
         );
     }
 }
+
+uniform_block_def! {
+    struct CubeInstanceData {
+        transform: Mat4,
+        color: Vec3,
+    }
+}
+
+const COLORS: [Vec3; 3] = [
+    Vec3::new(0.8, 0.2, 0.2),
+    Vec3::new(0.2, 0.8, 0.2),
+    Vec3::new(0.2, 0.2, 0.8),
+];

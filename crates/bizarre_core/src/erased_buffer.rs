@@ -18,6 +18,27 @@ impl ErasedSparseArray {
         Self::with_capacity::<T>(INITIAL_CAPACITY)
     }
 
+    pub unsafe fn from_layout(layout: Layout) -> Self {
+        Self::from_layout_and_capacity(layout, INITIAL_CAPACITY)
+    }
+
+    pub unsafe fn from_layout_and_capacity(element_layout: Layout, capacity: usize) -> Self {
+        let (block_layout, element_stride) = element_layout.repeat(capacity).unwrap();
+
+        let data = unsafe { std::alloc::alloc_zeroed(block_layout) };
+
+        let valid_elements = BitBuffer::new(capacity);
+
+        Self {
+            element_layout,
+            element_stride,
+            valid_elements,
+            capacity,
+            data,
+            drop_fn: |ptr| unsafe {},
+        }
+    }
+
     pub fn with_capacity<T: Sized>(capacity: usize) -> Self {
         let element_layout = Layout::new::<T>();
         let (block_layout, element_stride) = element_layout.repeat(capacity).unwrap();
@@ -39,6 +60,14 @@ impl ErasedSparseArray {
         }
     }
 
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn stride(&self) -> usize {
+        self.element_stride
+    }
+
     pub unsafe fn get<T: Sized>(&self, at: usize) -> Option<&T> {
         if at >= self.capacity || !self.valid_elements.get(at)? {
             return None;
@@ -55,6 +84,14 @@ impl ErasedSparseArray {
 
         let offset = self.element_stride * at;
         self.data.add(offset).cast::<T>().as_mut()
+    }
+
+    pub unsafe fn as_ptr<T>(&self) -> *const T {
+        self.data.cast::<T>()
+    }
+
+    pub unsafe fn as_mut_ptr<T>(&self) -> *mut T {
+        self.data.cast::<T>()
     }
 
     pub unsafe fn as_slice<T: Sized>(&self) -> &[T] {
@@ -84,6 +121,36 @@ impl ErasedSparseArray {
         };
 
         ptr.write(value);
+
+        if prev_value.is_none() {
+            self.valid_elements.set(at, true);
+        }
+
+        prev_value
+    }
+
+    pub unsafe fn insert_bytes(&mut self, at: usize, data: &[u8]) -> Option<Vec<u8>> {
+        if at >= self.capacity {
+            panic!(
+                "insertion index (is {at}) must be < than size (is {})",
+                self.capacity
+            );
+        }
+
+        let data_len = data.len();
+
+        let offset = self.element_stride * at;
+        let ptr = self.data.add(offset);
+
+        let slice = std::slice::from_raw_parts_mut(ptr, self.element_stride);
+
+        let prev_value = if let Some(true) = self.valid_elements.get(at) {
+            Some(slice.to_vec())
+        } else {
+            None
+        };
+
+        slice.copy_from_slice(data);
 
         if prev_value.is_none() {
             self.valid_elements.set(at, true);
@@ -170,6 +237,18 @@ impl Drop for ErasedSparseArray {
             let offset = self.element_stride * i;
             unsafe { (self.drop_fn)(self.data.add(offset).cast()) }
         })
+    }
+}
+
+impl std::fmt::Debug for ErasedSparseArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let valid_count = self.valid_elements.iter().filter(|i| *i).count();
+
+        f.debug_struct("ErasedSparseArray")
+            .field("element_stride", &self.element_stride)
+            .field("valid_elements", &valid_count)
+            .field("capacity", &self.capacity)
+            .finish()
     }
 }
 

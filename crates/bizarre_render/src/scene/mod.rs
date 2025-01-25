@@ -1,4 +1,5 @@
 use std::{
+    any::type_name,
     collections::{BTreeMap, BTreeSet, VecDeque},
     time::Duration,
 };
@@ -43,6 +44,12 @@ pub type SceneResult<T> = Result<T, SceneError>;
 
 #[derive(Clone, Copy, Debug, Component)]
 pub struct RenderObjectId(usize);
+
+impl RenderObjectId {
+    pub fn inner(&self) -> usize {
+        self.0
+    }
+}
 
 const INITIAL_VERTEX_LEN: usize = 10_000;
 const INITIAL_INDEX_LEN: usize = 50_000;
@@ -127,13 +134,19 @@ impl Scene {
         self.id_recycling.push_back(object_id.0)
     }
 
-    pub fn update_object(&mut self, object_id: RenderObjectId, instance_data: InstanceData) {
+    #[track_caller]
+    pub fn update_object<T: Clone>(&mut self, object_id: RenderObjectId, instance_data: T) {
+        assert_ubo_alignemnt::<T>();
+
         self.frames
             .iter_mut()
             .for_each(|frame| frame.update_object(object_id, instance_data.clone()));
     }
 
-    pub fn add_object(&mut self, object: RenderObject) -> RenderObjectId {
+    #[track_caller]
+    pub fn add_object<T: Clone>(&mut self, object: RenderObject<T>) -> RenderObjectId {
+        assert_ubo_alignemnt::<T>();
+
         let id = if let Some(id) = self.id_recycling.pop_front() {
             id
         } else {
@@ -181,7 +194,9 @@ pub struct SceneIndirectDrawIterator<'a> {
 
 pub struct IndirectIterItem<'a> {
     pub materials: &'a RenderObjectMaterials,
-    pub offset: vk::DeviceSize,
+    pub indirect_offset: vk::DeviceSize,
+    pub batch_offset: vk::DeviceSize,
+    pub batch_range: vk::DeviceSize,
     pub count: u32,
 }
 
@@ -205,7 +220,9 @@ impl<'a> Iterator for SceneIndirectDrawIterator<'a> {
 
         Some(IndirectIterItem {
             materials: &batch.materials,
-            offset,
+            indirect_offset: offset,
+            batch_offset: batch.offset as u64,
+            batch_range: (batch.count * batch.instance_data_stride) as u64,
             count: *helper,
         })
     }
@@ -216,4 +233,14 @@ pub struct MeshMapping {
     index_offset: u32,
     index_count: u32,
     vertex_offset: u32,
+}
+
+#[track_caller]
+fn assert_ubo_alignemnt<T>() {
+    debug_assert!(
+        align_of::<T>() == 16,
+        "Trying to use `{}` as a instance data for rendering, but it has align of {} (align of 16 is required)",
+        type_name::<T>(),
+        align_of::<T>()
+    );
 }

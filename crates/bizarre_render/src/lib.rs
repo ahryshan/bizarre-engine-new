@@ -15,6 +15,7 @@ mod debug_messenger;
 mod device;
 mod image;
 mod instance;
+mod macros;
 mod vulkan_context;
 
 pub mod antialiasing;

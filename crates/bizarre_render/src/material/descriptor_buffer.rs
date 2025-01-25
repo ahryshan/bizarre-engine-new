@@ -131,15 +131,17 @@ impl DescriptorBuffer {
     pub unsafe fn set_uniform_buffer_unchecked(
         &mut self,
         buffer: &GpuBuffer,
-        index: usize,
+        buffer_offset: vk::DeviceSize,
+        buffer_range: vk::DeviceSize,
+        descriptor_index: usize,
     ) -> vk::DeviceSize {
         let device = get_device();
 
-        let ad = device.get_buffer_address(buffer.buffer());
+        let ad = device.get_buffer_address(buffer.buffer()) + buffer_offset;
 
         let addr_info = vk::DescriptorAddressInfoEXT::default()
             .address(ad)
-            .range(buffer.size())
+            .range(buffer_range)
             .format(vk::Format::UNDEFINED);
 
         let descriptor_info = vk::DescriptorGetInfoEXT::default()
@@ -148,7 +150,7 @@ impl DescriptorBuffer {
                 p_uniform_buffer: &addr_info,
             });
 
-        let offset = self.element_offset as usize + index * self.element_stride as usize;
+        let offset = self.element_offset as usize + descriptor_index * self.element_stride as usize;
 
         let descriptor = unsafe {
             let ptr = self.map_ptr::<u8>().unwrap();

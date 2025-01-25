@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fmt::Debug,
     mem::variant_count,
     ops::{Index, IndexMut},
 };
@@ -20,12 +21,38 @@ bitflags! {
     }
 }
 
+#[derive(Clone)]
+pub struct RenderObject<T: Clone> {
+    pub meta: RenderObjectMeta,
+    pub instance_data: T,
+}
+
+impl<T> Debug for RenderObject<T>
+where
+    T: Debug + Clone,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderObject")
+            .field("meta", &self.meta)
+            .field("instance_data", &self.instance_data)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct RenderObject {
+pub struct RenderObjectMeta {
     pub flags: RenderObjectFlags,
     pub materials: RenderObjectMaterials,
     pub mesh: MeshHandle,
-    pub instance_data: InstanceData,
+}
+
+impl<T: Clone> RenderObject<T> {
+    pub fn new(meta: RenderObjectMeta, instance_data: T) -> Self {
+        Self {
+            meta,
+            instance_data,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

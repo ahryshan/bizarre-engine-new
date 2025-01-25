@@ -1,19 +1,59 @@
-use std::{collections::VecDeque, ops::Range};
+use cfg_if::cfg_if;
+use std::{alloc::Layout, any::TypeId, collections::VecDeque, ops::Range};
+
+use bizarre_core::erased_buffer::ErasedSparseArray;
 
 use crate::mesh::MeshHandle;
 
-use super::render_object::RenderObjectMaterials;
+use super::render_object::{RenderObjectMaterials, RenderObjectMeta};
 
-#[derive(Default, Clone, Debug)]
+#[derive(Debug)]
 pub struct RenderBatch {
     pub mesh: MeshHandle,
     pub materials: RenderObjectMaterials,
     pub offset: usize,
     pub count: usize,
+    pub instance_data_stride: usize,
+    pub instance_data: ErasedSparseArray,
     pub holes: VecDeque<usize>,
 }
 
 impl RenderBatch {
+    pub fn new(
+        offset: usize,
+        render_object_meta: &RenderObjectMeta,
+        instance_data_layout: Layout,
+    ) -> Self {
+        let instance_data = unsafe { ErasedSparseArray::from_layout(instance_data_layout) };
+        let instance_data_stride = instance_data.stride();
+
+        Self {
+            mesh: render_object_meta.mesh,
+            materials: render_object_meta.materials.clone(),
+            count: 0,
+            holes: Default::default(),
+            instance_data,
+            instance_data_stride,
+            offset,
+        }
+    }
+
+    pub unsafe fn insert<T>(&mut self, at: usize, instance_data: T) {
+        if at >= self.instance_data.capacity() {
+            self.instance_data.grow(at + 1);
+        }
+
+        self.instance_data.insert(at, instance_data);
+    }
+
+    pub unsafe fn insert_bytes(&mut self, at: usize, data: &[u8]) {
+        if at >= self.instance_data.capacity() {
+            self.instance_data.grow(at + 1);
+        }
+
+        self.instance_data.insert_bytes(at, data);
+    }
+
     pub fn empty(&self) {
         self.holes.len() == self.count;
     }

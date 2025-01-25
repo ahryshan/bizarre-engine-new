@@ -40,8 +40,8 @@ pub const fn base_scene_bindings() -> &'static [MaterialBinding] {
             shader_stage_flags: ShaderStageFlags::VERTEX,
         },
         MaterialBinding {
-            set: 0,
-            binding: 1,
+            set: 1,
+            binding: 0,
             descriptor_count: 1,
             descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
             binding_rate: MaterialBindingRate::PerFrame,

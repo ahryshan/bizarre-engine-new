@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Deref};
+use std::{alloc::Layout, collections::BTreeMap, ops::Deref};
 
 use bitflags::bitflags;
 
@@ -14,9 +14,10 @@ use crate::{
 };
 
 use super::{
-    render_batch::RenderBatch, render_object::RenderObject, InstanceData, MeshMapping,
-    RenderObjectId, SceneResult, SceneUniform, INITIAL_INDEX_LEN, INITIAL_INDIRECT_LEN,
-    INITIAL_INSTANCE_LEN, INITIAL_VERTEX_LEN,
+    render_batch::RenderBatch,
+    render_object::{RenderObject, RenderObjectMeta},
+    InstanceData, MeshMapping, RenderObjectId, SceneResult, SceneUniform, INITIAL_INDEX_LEN,
+    INITIAL_INDIRECT_LEN, INITIAL_INSTANCE_LEN, INITIAL_VERTEX_LEN,
 };
 
 bitflags! {
@@ -31,8 +32,8 @@ bitflags! {
 
 #[derive(Clone, Debug)]
 pub enum SceneChange {
-    AddObject(RenderObjectId, RenderObject),
-    UpdateObject(RenderObjectId, InstanceData),
+    AddObject(RenderObjectId, RenderObjectMeta, Layout, Vec<u8>),
+    UpdateObject(RenderObjectId, Vec<u8>),
     RemoveObject(RenderObjectId),
     UpdateSceneUniform(SceneUniform),
 }
@@ -48,7 +49,6 @@ pub struct SceneFrameData {
     /// Maps RenderObjectId (throug this vec index) to a (batch_id, index_into_batch) pair
     pub(crate) instance_mapping: Vec<Option<(usize, usize)>>,
     pub(crate) pending_changes: Vec<SceneChange>,
-    pub(crate) instance_data: Vec<InstanceData>,
     pub(crate) instance_data_ubo: GpuBuffer,
     pub(crate) indirect_buffer: GpuBuffer,
     pub(crate) indirect_helpers: Vec<u32>,
@@ -98,7 +98,6 @@ impl SceneFrameData {
             index_buffer,
             indirect_buffer,
             indirect_helpers: Default::default(),
-            instance_data: Default::default(),
             instance_data_ubo,
             instance_mapping: Default::default(),
             mesh_map: Default::default(),
@@ -114,9 +113,17 @@ impl SceneFrameData {
             .collect::<Vec<_>>()
             .into_iter()
             .for_each(|change| match change {
-                SceneChange::AddObject(render_object_id, render_object) => {
-                    self.handle_add(render_object_id, render_object)
-                }
+                SceneChange::AddObject(
+                    render_object_id,
+                    render_object_meta,
+                    instance_data_layout,
+                    instance_data,
+                ) => self.handle_add(
+                    render_object_id,
+                    render_object_meta,
+                    instance_data_layout,
+                    instance_data,
+                ),
                 SceneChange::UpdateObject(render_object_id, instance_data) => {
                     self.handle_update(render_object_id, instance_data)
                 }
@@ -137,12 +144,26 @@ impl SceneFrameData {
         })
     }
 
-    pub fn add_object(&mut self, object_id: RenderObjectId, object: RenderObject) {
-        self.pending_changes
-            .push(SceneChange::AddObject(object_id, object));
+    pub fn add_object<T: Clone>(&mut self, object_id: RenderObjectId, object: RenderObject<T>) {
+        let instance_data = unsafe {
+            let ptr = (&raw const object.instance_data).cast::<u8>();
+            std::slice::from_raw_parts(ptr, size_of::<T>()).to_vec()
+        };
+
+        self.pending_changes.push(SceneChange::AddObject(
+            object_id,
+            object.meta,
+            Layout::new::<T>(),
+            instance_data,
+        ));
     }
 
-    pub fn update_object(&mut self, object_id: RenderObjectId, instance_data: InstanceData) {
+    pub fn update_object<T>(&mut self, object_id: RenderObjectId, instance_data: T) {
+        let instance_data = unsafe {
+            let ptr = (&raw const instance_data).cast::<u8>();
+            std::slice::from_raw_parts(ptr, size_of::<T>()).to_vec()
+        };
+
         self.pending_changes
             .push(SceneChange::UpdateObject(object_id, instance_data))
     }
@@ -158,7 +179,13 @@ impl SceneFrameData {
     }
 
     #[inline]
-    fn handle_add(&mut self, render_object_id: RenderObjectId, render_object: RenderObject) {
+    fn handle_add(
+        &mut self,
+        render_object_id: RenderObjectId,
+        render_object_meta: RenderObjectMeta,
+        instance_data_layout: Layout,
+        instance_data: Vec<u8>,
+    ) {
         if render_object_id.0 >= self.instance_mapping.len() {
             let additional: Vec<Option<(usize, usize)>> =
                 vec![None; render_object_id.0 - self.instance_mapping.len() + 1];
@@ -167,29 +194,31 @@ impl SceneFrameData {
         }
 
         let batch_id = self.batches.iter().position(|batch| {
-            batch.mesh == render_object.mesh && batch.materials == render_object.materials
+            batch.mesh == render_object_meta.mesh && batch.materials == render_object_meta.materials
         });
 
         if let Some(batch_id) = batch_id {
             let batch = &mut self.batches[batch_id];
 
             if let Some(hole) = batch.holes.pop_front() {
-                self.instance_data[batch.offset + hole] = render_object.instance_data;
                 self.instance_mapping[render_object_id.0] = Some((batch_id, hole));
+
+                unsafe { batch.insert_bytes(hole, &instance_data) };
 
                 self.flags.insert(SceneFrameFlags::NEED_INSTANCE_DATA_SYNC);
             } else {
                 let object_idx = batch.count;
                 batch.count += 1;
 
-                self.instance_data
-                    .insert(batch.offset + object_idx, render_object.instance_data);
+                unsafe {
+                    batch.insert_bytes(object_idx, &instance_data);
+                }
 
                 self.instance_mapping[render_object_id.0] = Some((batch_id, object_idx));
 
                 self.batches[batch_id + 1..]
                     .iter_mut()
-                    .for_each(|batch| batch.offset += 1);
+                    .for_each(|batch| batch.offset += instance_data.len());
 
                 self.flags
                     .insert(SceneFrameFlags::NEED_INSTANCE_DATA_REBUILD);
@@ -198,25 +227,25 @@ impl SceneFrameData {
             let batch_id = self.batches.len();
 
             let offset = match self.batches.last() {
-                Some(batch) => batch.offset + batch.count,
+                Some(batch) => batch.offset + (batch.count * batch.instance_data_stride),
                 None => 0,
             };
 
-            self.batches.push(RenderBatch {
-                offset,
-                count: 1,
-                holes: Default::default(),
-                materials: render_object.materials,
-                mesh: render_object.mesh,
-            });
+            let mut batch = RenderBatch::new(offset, &render_object_meta, instance_data_layout);
+
+            unsafe {
+                let _ = batch.insert_bytes(0, &instance_data);
+            }
+
+            batch.count += 1;
+            self.batches.push(batch);
 
             self.flags
                 .insert(SceneFrameFlags::NEED_INSTANCE_DATA_REBUILD);
 
-            self.instance_data.push(render_object.instance_data);
             self.instance_mapping[render_object_id.0] = Some((batch_id, 0));
 
-            if !self.mesh_map.contains_key(&render_object.mesh) {
+            if !self.mesh_map.contains_key(&render_object_meta.mesh) {
                 self.flags.insert(SceneFrameFlags::NEED_MESH_REBUILD);
             }
         }
@@ -225,8 +254,8 @@ impl SceneFrameData {
     }
 
     #[inline]
-    fn handle_update(&mut self, object_id: RenderObjectId, instance_data: InstanceData) {
-        let Some(Some((batch_id, object_id))) = self.instance_mapping.get(object_id.0).cloned()
+    fn handle_update(&mut self, object_id: RenderObjectId, instance_data: Vec<u8>) {
+        let Some(Some((batch_id, object_idx))) = self.instance_mapping.get(object_id.0).cloned()
         else {
             return;
         };
@@ -235,8 +264,9 @@ impl SceneFrameData {
             return;
         };
 
-        let global_offset = batch.offset + object_id;
-        self.instance_data[global_offset] = instance_data;
+        unsafe {
+            batch.insert_bytes(object_idx, &instance_data);
+        }
 
         self.flags.insert(SceneFrameFlags::NEED_INSTANCE_DATA_SYNC);
     }
@@ -296,7 +326,7 @@ impl SceneFrameData {
                         first_index,
                         index_count,
                         vertex_offset,
-                        first_instance: (batch.offset + range.start) as u32,
+                        first_instance: range.start as u32,
                         instance_count: range.count() as u32,
                     });
                 }
@@ -327,18 +357,33 @@ impl SceneFrameData {
 
     #[inline]
     fn sync_instance_data(&mut self) {
+        let instance_data_len = self
+            .batches
+            .iter()
+            .fold(0, |acc, curr| acc + curr.count * curr.instance_data_stride);
+
         //TODO: Make it to actually sync only needed ranges
         let mut mapped_slice = self
             .instance_data_ubo
-            .map_as_slice(0, self.instance_data.len())
+            .map_as_slice::<u8>(0, instance_data_len)
             .unwrap();
 
-        mapped_slice.clone_from_slice(&self.instance_data);
+        let ptr = mapped_slice.as_mut_ptr();
+
+        let mut offset = 0;
+        for batch in self.batches.iter() {
+            unsafe {
+                let buffer_ptr = ptr.add(offset);
+                let count = batch.count * batch.instance_data_stride;
+                buffer_ptr.copy_from_nonoverlapping(batch.instance_data.as_ptr(), count);
+                offset += count;
+            }
+        }
 
         drop(mapped_slice);
 
         self.instance_data_ubo
-            .flush_range(0, self.instance_data.len() as vk::DeviceSize)
+            .flush_range(0, instance_data_len as vk::DeviceSize)
             .unwrap();
 
         self.flags.remove(SceneFrameFlags::NEED_INSTANCE_DATA_SYNC);

@@ -6,6 +6,7 @@ use component_batch::ComponentBatch;
 use crate::{
     entity::Entity,
     resource::{Resource, ResourceId},
+    world::World,
 };
 
 pub mod component_batch;
@@ -14,7 +15,14 @@ mod component_storage;
 
 pub use bizarre_ecs_proc_macro::Component;
 
-pub trait Component: Resource {}
+pub trait Component: Resource {
+    fn on_insert(&mut self, world: &mut World) {
+        let _ = world;
+    }
+    fn on_remove(&mut self, world: &mut World) {
+        let _ = world;
+    }
+}
 
 pub struct ComponentRegistry {
     storages: Vec<Option<ErasedSparseArray>>,

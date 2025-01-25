@@ -16,34 +16,21 @@ layout(set = 0, binding = 0) uniform SceneUniform {
 
 struct InstanceData {
     mat4 transform;
+    vec3 color;
 } instance_data;
 
-layout(set = 0, binding = 1) uniform InstanceUbo {
+layout(set = 1, binding = 0) uniform InstanceUbo {
     InstanceData data[MAX_UNIFORM_LENGTH];
 } instance_ubo;
 
-mat4 view = {
-    {1.0, 0.0, -0.0, 0.0},
-    {-0.0, 1.0, -0.0, 0.0},
-    {0.0, 0.0, 1.0, 0.0},
-    {0.0, -0.0, -10.0, 1.0}
-};
-
-mat4 projection = {
-    {0.43301266, 0.0, 0.0, 0.0},
-    {0.0, 0.57735026, 0.0, 0.0},
-    {0.0, 0.0, -1.0001999, -1.0},
-    {0.0, 0.0, -0.20002, 0.0}
-};
-
 void main() {
-    mat4 instance_transform = instance_ubo.data[gl_InstanceIndex].transform;
-    // mat4 instance_transform = instance_transforms_ubo.transform[gl_InstanceIndex];
+    InstanceData instance_data = instance_ubo.data[gl_InstanceIndex];
 
-    vec4 pos = scene_ubo.projection * scene_ubo.view * instance_transform * vec4(in_position, 1.0);
+    vec4 pos = scene_ubo.projection * scene_ubo.view * instance_data.transform * vec4(in_position, 1.0);
     gl_Position = pos;
     out_position = vec3(pos);
 
-    out_color = vec3(1.0, 1.0, 1.0);
-    out_normal = mat3(transpose(inverse(instance_transform))) * in_normal;
+    out_color = instance_data.color;
+    // out_color = vec3(1);
+    out_normal = mat3(transpose(inverse(instance_data.transform))) * in_normal;
 }

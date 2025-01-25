@@ -10,7 +10,7 @@ mod component;
 mod component_batch;
 mod resource;
 
-#[proc_macro_derive(Component)]
+#[proc_macro_derive(Component, attributes(on_insert_fn, on_remove_fn))]
 pub fn derive_component(input: TokenStream) -> TokenStream {
     derive_component_impl(parse_macro_input!(input as DeriveInput)).into()
 }
