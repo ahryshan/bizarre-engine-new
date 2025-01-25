@@ -5,11 +5,11 @@ use bizarre_ecs::{
     system::schedule::Schedule,
     world::ecs_module::EcsModule,
 };
-use bizarre_event::EventQueue;
+use bizarre_event::{EventQueue, Events};
 use bizarre_log::core_info;
 use bizarre_sdl::{
     context::{with_sdl_context, with_sdl_events},
-    input::InputEvent,
+    input::{InputEvent, InputState},
     window::{try_handle_sdl_event, WindowCreateInfo, WindowEvent, WindowHandle, Windows},
 };
 
@@ -51,7 +51,16 @@ impl EcsModule for SdlModule {
         }
 
         world.insert_resource(windows);
-        world.add_systems(Schedule::Preupdate, push_sdl_events);
+        world.insert_resource(InputState::new());
+        world.add_systems(Schedule::Preupdate, (push_sdl_events, update_input_state));
+    }
+}
+
+fn update_input_state(mut input: ResMut<InputState>, events: Events<InputEvent>) {
+    input.swap_frames();
+
+    for event in events {
+        input.process_event(event)
     }
 }
 

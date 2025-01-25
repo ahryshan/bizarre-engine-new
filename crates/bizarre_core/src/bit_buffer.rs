@@ -1,4 +1,4 @@
-use std::{alloc::Layout, ops::Deref};
+use std::alloc::Layout;
 
 const SHORT_BUFFER_SIZE: usize = size_of::<BitBufferData>();
 
@@ -40,8 +40,16 @@ impl BitBuffer {
         self.size
     }
 
+    pub fn width(&self) -> usize {
+        self.size * 8
+    }
+
     pub fn set(&mut self, at: usize, value: bool) {
-        debug_assert!(at / 8 < self.size);
+        debug_assert!(
+            at / 8 < self.size,
+            "trying to set bit at index {at} (len is {})",
+            self.width()
+        );
 
         let (byte, bit) = byte_bit_index(at);
         let data = self.data_mut();
@@ -124,6 +132,15 @@ impl BitBuffer {
 
             self.size = new_size;
         }
+    }
+
+    pub fn copy_from(&mut self, other: &Self) {
+        let size = self.size.min(other.size);
+        unsafe {
+            self.data_ptr_mut()
+                .cast::<u8>()
+                .copy_from_nonoverlapping(other.data_ptr().cast(), size)
+        };
     }
 
     pub fn iter<'a>(&'a self) -> BitBufferIter<'a> {

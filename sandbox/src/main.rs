@@ -113,48 +113,44 @@ fn render(
         *last_render = Instant::now();
     }
 
-    if let Some(window_events) = window_events.as_ref() {
-        for event in window_events.iter() {
-            match event {
-                WindowEvent::Resized { size, .. } if size.x == 0 || size.y == 0 => {
-                    *skip_render = true
-                }
-                WindowEvent::Resized { handle, size } => {
-                    let handle = PresentTargetHandle::from_raw(handle.as_raw());
-                    let present_target = assets.present_target_mut(&handle).unwrap();
-                    present_target.resize().unwrap();
+    for event in window_events {
+        match event {
+            WindowEvent::Resized { size, .. } if size.x == 0 || size.y == 0 => *skip_render = true,
+            WindowEvent::Resized { handle, size } => {
+                let handle = PresentTargetHandle::from_raw(handle.as_raw());
+                let present_target = assets.present_target_mut(&handle).unwrap();
+                present_target.resize().unwrap();
 
-                    assets
-                        .render_targets
-                        .get_mut(&render_target.0)
-                        .unwrap()
-                        .resize(*size)
-                        .unwrap();
+                assets
+                    .render_targets
+                    .get_mut(&render_target.0)
+                    .unwrap()
+                    .resize(size)
+                    .unwrap();
 
-                    let view = look_at(
-                        &Vec3::new(3.0, 2.0, 10.0),
-                        &Vec3::zeros(),
-                        &Vec3::new(0.0, 1.0, 0.0),
-                    );
+                let view = look_at(
+                    &Vec3::new(3.0, 2.0, 10.0),
+                    &Vec3::zeros(),
+                    &Vec3::new(0.0, 1.0, 0.0),
+                );
 
-                    let projection = perspective(
-                        size.x as f32 / size.y as f32,
-                        90.0f32.to_radians(),
-                        0.1,
-                        1000.0,
-                    );
+                let projection = perspective(
+                    size.x as f32 / size.y as f32,
+                    90.0f32.to_radians(),
+                    0.1,
+                    1000.0,
+                );
 
-                    assets
-                        .scene_mut(&scene_handle.0)
-                        .unwrap()
-                        .update_scene_uniform(SceneUniform { view, projection });
+                assets
+                    .scene_mut(&scene_handle.0)
+                    .unwrap()
+                    .update_scene_uniform(SceneUniform { view, projection });
 
-                    *skip_render = false
-                }
-                WindowEvent::Exposed(..) => *skip_render = false,
-                WindowEvent::Hidden(..) => *skip_render = true,
-                _ => (),
+                *skip_render = false
             }
+            WindowEvent::Exposed(..) => *skip_render = false,
+            WindowEvent::Hidden(..) => *skip_render = true,
+            _ => (),
         }
     }
 

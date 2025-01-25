@@ -14,7 +14,7 @@ use bizarre_engine::{
             InstanceData, RenderObjectId,
         },
     },
-    sdl::input::InputEvent,
+    sdl::input::{InputEvent, InputState, Scancode},
 };
 
 use bizarre_engine::prelude::*;
@@ -54,7 +54,19 @@ pub struct Cube {
 impl EcsModule for SandboxModule {
     fn apply(self, world: &mut bizarre_engine::ecs::world::World) {
         world.add_systems(Schedule::Init, setup_cubes);
-        world.add_systems(Schedule::Update, (update_cubes));
+        world.add_systems(Schedule::Update, (update_cubes, show_input_state));
+    }
+}
+
+fn show_input_state(input_state: Res<InputState>) {
+    if input_state.was_key_just_pressed(Scancode::I) {
+        let pressed_keys = input_state
+            .pressed_keys()
+            .map(|key| format!("{key}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        info!("Pressed keys: {pressed_keys}");
     }
 }
 

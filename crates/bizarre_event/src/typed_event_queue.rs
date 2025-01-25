@@ -72,7 +72,7 @@ impl TypedEventQueue {
         }
     }
 
-    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Option<Box<[E]>>
+    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Vec<E>
     where
         E: Event + Clone,
     {
@@ -82,7 +82,7 @@ impl TypedEventQueue {
             .unwrap_or_else(|| panic!("Trying to poll event with an unregistered `EventReader`"));
 
         if *reader_index >= self.front.len() {
-            return None;
+            return Vec::new();
         }
 
         let result = self
@@ -99,11 +99,11 @@ impl TypedEventQueue {
                 })
             })
             .cloned()
-            .collect::<Box<[E]>>();
+            .collect::<Vec<_>>();
 
         *reader_index += result.len();
 
-        Some(result)
+        result
     }
 
     pub fn add_reader(&mut self, reader: EventReader) {
