@@ -99,12 +99,12 @@ impl RenderAssets {
 
     pub fn create_material(
         &mut self,
-        pipeline_requirements: VulkanPipelineRequirements,
+        pipeline_requirements: &VulkanPipelineRequirements,
     ) -> MaterialHandle {
         let pipeline =
-            VulkanPipeline::from_requirements(&pipeline_requirements, None, get_device()).unwrap();
+            VulkanPipeline::from_requirements(pipeline_requirements, None, get_device()).unwrap();
 
-        let material = Material::new(pipeline, pipeline_requirements.bindings);
+        let material = Material::new(pipeline, &pipeline_requirements.bindings);
 
         let handle = self.materials.insert(material);
 

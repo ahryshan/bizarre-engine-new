@@ -129,6 +129,7 @@ impl ErasedSparseArray {
         prev_value
     }
 
+    #[track_caller]
     pub unsafe fn insert_bytes(&mut self, at: usize, data: &[u8]) -> Option<Vec<u8>> {
         if at >= self.capacity {
             panic!(
@@ -176,6 +177,7 @@ impl ErasedSparseArray {
         let data = unsafe { std::alloc::realloc(self.data, layout, new_size) };
         self.data = data;
         self.capacity = new_capacity;
+        self.valid_elements.expand_to(new_capacity);
 
         true
     }

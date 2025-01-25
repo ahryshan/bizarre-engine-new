@@ -321,7 +321,7 @@ impl ImageRenderTarget {
                     .image_layout(image.image_layout)
                     .clear_value(
                         (vk::ClearValue {
-                            color: vk::ClearColorValue { float32: [0.3; 4] },
+                            color: vk::ClearColorValue { float32: [0.0; 4] },
                         })
                         .clone(),
                     )
@@ -369,7 +369,7 @@ impl ImageRenderTarget {
 
             let clear_color = vk::ClearValue {
                 color: vk::ClearColorValue {
-                    float32: [1.0, 0.0, 0.0, 1.0],
+                    float32: [0.0, 0.0, 0.0, 0.0],
                 },
             };
 

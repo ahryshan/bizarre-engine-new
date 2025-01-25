@@ -16,6 +16,7 @@ layout(set = 0, binding = 0) uniform SceneUniform {
 
 struct InstanceData {
     mat4 transform;
+    vec3 color;
 } instance_data;
 
 layout(set = 1, binding = 0) uniform InstanceUbo {
@@ -29,6 +30,6 @@ void main() {
     gl_Position = pos;
     out_position = vec3(pos);
 
-    out_color = vec3(1);
+    out_color = instance_data.color;
     out_normal = mat3(transpose(inverse(instance_data.transform))) * in_normal;
 }

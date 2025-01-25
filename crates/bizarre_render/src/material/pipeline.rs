@@ -37,14 +37,14 @@ pub struct ShaderStageDefinition {
 #[derive(Debug, Clone)]
 pub struct VulkanPipelineRequirements<'a> {
     pub features: VulkanPipelineFeatures,
-    pub bindings: &'a [MaterialBinding],
-    pub stage_definitions: &'a [ShaderStageDefinition],
+    pub bindings: Vec<MaterialBinding>,
+    pub stage_definitions: Vec<ShaderStageDefinition>,
     pub base_pipeline: Option<&'a VulkanPipeline>,
-    pub vertex_bindings: &'a [vk::VertexInputBindingDescription],
-    pub vertex_attributes: &'a [vk::VertexInputAttributeDescription],
+    pub vertex_bindings: Vec<vk::VertexInputBindingDescription>,
+    pub vertex_attributes: Vec<vk::VertexInputAttributeDescription>,
     pub samples: vk::SampleCountFlags,
-    pub color_attachment_formats: &'a [vk::Format],
-    pub input_attachment_indices: &'a [u32],
+    pub color_attachment_formats: Vec<vk::Format>,
+    pub input_attachment_indices: Vec<u32>,
     pub depth_attachment_format: vk::Format,
 }
 
@@ -66,12 +66,12 @@ impl VulkanPipeline {
         let dynamic_state_info =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        let vertex_binding_descriptions = requirements.vertex_bindings;
-        let vertex_input_attributes = requirements.vertex_attributes;
+        let vertex_binding_descriptions = &requirements.vertex_bindings;
+        let vertex_input_attributes = &requirements.vertex_attributes;
 
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
-            .vertex_binding_descriptions(vertex_binding_descriptions)
-            .vertex_attribute_descriptions(vertex_input_attributes);
+            .vertex_binding_descriptions(&vertex_binding_descriptions)
+            .vertex_attribute_descriptions(&vertex_input_attributes);
 
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(requirements.features.primitive_topology.into())
@@ -224,11 +224,11 @@ impl VulkanPipeline {
         }
 
         let mut pipeline_rendering_info = vk::PipelineRenderingCreateInfo::default()
-            .color_attachment_formats(requirements.color_attachment_formats)
+            .color_attachment_formats(&requirements.color_attachment_formats)
             .depth_attachment_format(requirements.depth_attachment_format);
 
         let mut attachment_index_info = vk::RenderingInputAttachmentIndexInfoKHR::default()
-            .color_attachment_input_indices(requirements.input_attachment_indices);
+            .color_attachment_input_indices(&requirements.input_attachment_indices);
 
         let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)

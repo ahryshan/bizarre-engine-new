@@ -7,7 +7,10 @@ use bizarre_engine::{
     prelude::ComponentBatch,
     render::{
         asset_manager::RenderAssets,
-        material::material_instance::MaterialInstanceHandle,
+        material::{
+            builtin::with_basic_deferred, material_instance::MaterialInstanceHandle,
+            pipeline::ShaderStageDefinition,
+        },
         mesh::MeshHandle,
         scene::{
             render_object::{
@@ -15,6 +18,7 @@ use bizarre_engine::{
             },
             InstanceData, RenderObjectId,
         },
+        shader::ShaderStage,
         uniform_block_def,
     },
     sdl::input::{InputEvent, InputState, Scancode},
@@ -74,45 +78,71 @@ fn show_input_state(input_state: Res<InputState>) {
 }
 
 fn setup_cubes(mut assets: ResMut<RenderAssets>, scene_handle: Res<MainScene>, mut cmd: Commands) {
+    let material = with_basic_deferred(|reqs| {
+        reqs.stage_definitions[0] = ShaderStageDefinition {
+            path: String::from("assets/shaders/cube_deferred.vert"),
+            stage: ShaderStage::Vertex,
+        };
+    });
+
+    let material_handle = assets.insert_material(material);
+    let (instance_handle, ..) = assets.create_material_instance(material_handle).unwrap();
+
     let scene = assets.scene_mut(&scene_handle.0).unwrap();
 
-    for x in -3i32..3i32 {
-        for z in -3i32..3i32 {
+    let quart: i32 = 10;
+    let distance: f32 = 3.0;
+
+    for x in -quart..=quart {
+        for z in -quart..=quart {
             let transform = Transform {
-                translation: Vec3::new(x as f32 * 3.5, 0.0, z as f32 * 3.5),
+                translation: Vec3::new(x as f32 * distance, 0.0, z as f32 * distance),
                 scale: Vec3::new(1.0, 1.0, 1.0),
                 ..Default::default()
             };
 
-            let materials = RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(1usize));
+            let (obj_id, is_colored) = if x.abs() != z.abs() {
+                let meta = RenderObjectMeta {
+                    flags: RenderObjectFlags::empty(),
+                    materials: RenderObjectMaterials::new(instance_handle),
+                    mesh: MeshHandle::from_raw(1usize),
+                };
 
-            let meta = RenderObjectMeta {
-                flags: RenderObjectFlags::empty(),
-                materials: RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(1usize)),
-                mesh: MeshHandle::from_raw(1usize),
+                let instance_data = CubeInstanceData {
+                    transform: transform.get_transform(),
+                    color: COLORS[(x + z) as usize % 3],
+                };
+
+                let render_object = RenderObject::new(meta, instance_data);
+                (scene.add_object(render_object), true)
+            } else {
+                let meta = RenderObjectMeta {
+                    flags: RenderObjectFlags::empty(),
+                    materials: RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(1usize)),
+                    mesh: MeshHandle::from_raw(1usize),
+                };
+
+                let instance_data = InstanceData {
+                    transform: transform.get_transform(),
+                };
+
+                let render_object = RenderObject::new(meta, instance_data);
+                (scene.add_object(render_object), false)
             };
 
-            let instance_data = CubeInstanceData {
-                transform: transform.get_transform(),
-                color: COLORS[(x + z) as usize % 3],
-            };
-
-            let render_object = RenderObject::new(meta, instance_data);
-            let obj_id = scene.add_object(render_object);
-
-            cmd.spawn(Cube {
-                transform,
-                render_obj: obj_id,
-            });
+            cmd.spawn((transform, obj_id, IsColored(is_colored)));
         }
     }
 }
+
+#[derive(Component)]
+struct IsColored(bool);
 
 fn update_cubes(
     mut last_render: Local<Instant>,
     mut assets: ResMut<RenderAssets>,
     scene_handle: Res<MainScene>,
-    cubes: Query<(&mut Transform, &RenderObjectId)>,
+    cubes: Query<(&mut Transform, &RenderObjectId, &IsColored)>,
 ) {
     const ROTATION_SPEED_DEG: f32 = 180.0;
     let elapsed = last_render.elapsed();
@@ -120,15 +150,24 @@ fn update_cubes(
 
     let scene = assets.scene_mut(&scene_handle.0).unwrap();
 
-    for (transform, id) in cubes {
+    for (transform, id, is_colored) in cubes {
         transform.rotation.y += ROTATION_SPEED_DEG * elapsed.as_secs_f32();
-        scene.update_object(
-            *id,
-            CubeInstanceData {
-                transform: transform.get_transform(),
-                color: COLORS[id.inner() % 3],
-            },
-        );
+        if is_colored.0 {
+            scene.update_object(
+                *id,
+                CubeInstanceData {
+                    transform: transform.get_transform(),
+                    color: COLORS[(id.inner() * 2) % 3],
+                },
+            );
+        } else {
+            scene.update_object(
+                *id,
+                InstanceData {
+                    transform: transform.get_transform(),
+                },
+            );
+        }
     }
 }
 

@@ -16,11 +16,18 @@ use super::{
 };
 
 pub fn basic_deferred() -> Material {
+    with_basic_deferred(|_| {})
+}
+
+pub fn with_basic_deferred<'a, F>(f: F) -> Material
+where
+    F: Fn(&mut VulkanPipelineRequirements),
+{
     let device = get_device();
 
     let bindings = base_scene_bindings();
 
-    let req = VulkanPipelineRequirements {
+    let mut req = VulkanPipelineRequirements {
         features: VulkanPipelineFeatures {
             flags: PipelineFeatureFlags::DEPTH_TEST | PipelineFeatureFlags::DEPTH_WRITE,
             culling: CullMode::Back,
@@ -28,7 +35,7 @@ pub fn basic_deferred() -> Material {
             ..Default::default()
         },
         bindings,
-        stage_definitions: &[
+        stage_definitions: vec![
             ShaderStageDefinition {
                 path: String::from("assets/shaders/basic_deferred.vert"),
                 stage: ShaderStage::Vertex,
@@ -39,17 +46,19 @@ pub fn basic_deferred() -> Material {
             },
         ],
         base_pipeline: None,
-        vertex_bindings: &Vertex::bindings(),
-        vertex_attributes: &Vertex::attributes(),
+        vertex_bindings: Vertex::bindings().to_vec(),
+        vertex_attributes: Vertex::attributes().to_vec(),
         samples: vk::SampleCountFlags::TYPE_1,
-        color_attachment_formats: &[COLOR_FORMAT, COLOR_FORMAT, COLOR_FORMAT],
-        input_attachment_indices: &[
+        color_attachment_formats: vec![COLOR_FORMAT, COLOR_FORMAT, COLOR_FORMAT],
+        input_attachment_indices: vec![
             vk::ATTACHMENT_UNUSED,
             vk::ATTACHMENT_UNUSED,
             vk::ATTACHMENT_UNUSED,
         ],
         depth_attachment_format: DEPTH_FORMAT,
     };
+
+    f(&mut req);
 
     let pipeline = VulkanPipeline::from_requirements(&req, None, device).unwrap();
     Material::new(pipeline, &[])
@@ -60,7 +69,7 @@ pub fn basic_composition() -> Material {
 
     let req = VulkanPipelineRequirements {
         features: Default::default(),
-        bindings: &[
+        bindings: vec![
             MaterialBinding {
                 binding: 0,
                 set: 0,
@@ -86,7 +95,7 @@ pub fn basic_composition() -> Material {
                 shader_stage_flags: ShaderStageFlags::FRAGMENT,
             },
         ],
-        stage_definitions: &[
+        stage_definitions: vec![
             ShaderStageDefinition {
                 path: String::from("assets/shaders/basic_composition.vert"),
                 stage: ShaderStage::Vertex,
@@ -100,8 +109,8 @@ pub fn basic_composition() -> Material {
         vertex_bindings: Default::default(),
         vertex_attributes: Default::default(),
         samples: vk::SampleCountFlags::TYPE_1,
-        color_attachment_formats: &[COLOR_FORMAT, COLOR_FORMAT, COLOR_FORMAT, COLOR_FORMAT],
-        input_attachment_indices: &[0, 1, 2, vk::ATTACHMENT_UNUSED],
+        color_attachment_formats: vec![COLOR_FORMAT, COLOR_FORMAT, COLOR_FORMAT, COLOR_FORMAT],
+        input_attachment_indices: vec![0, 1, 2, vk::ATTACHMENT_UNUSED],
         depth_attachment_format: DEPTH_FORMAT,
     };
 

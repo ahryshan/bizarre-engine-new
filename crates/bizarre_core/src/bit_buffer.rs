@@ -44,6 +44,7 @@ impl BitBuffer {
         self.size * 8
     }
 
+    #[track_caller]
     pub fn set(&mut self, at: usize, value: bool) {
         debug_assert!(
             at / 8 < self.size,

@@ -71,7 +71,7 @@ impl EcsModule for RenderModule {
         let scene = assets.scene_mut(&scene_handle).unwrap();
 
         let view = look_at(
-            &Vec3::new(3.0, 5.0, 20.0),
+            &Vec3::new(3.0, 20.0, 5.0),
             &Vec3::zeros(),
             &Vec3::new(0.0, 1.0, 0.0),
         );

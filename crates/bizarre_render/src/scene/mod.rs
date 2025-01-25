@@ -63,7 +63,7 @@ pub struct SceneUniform {
     pub projection: Mat4,
 }
 
-#[repr(C, align(4))]
+#[repr(C, align(16))]
 #[derive(Debug, Clone, Default)]
 pub struct InstanceData {
     pub transform: Mat4,
@@ -213,7 +213,8 @@ impl<'a> Iterator for SceneIndirectDrawIterator<'a> {
             .get(self.helper_offset)?;
 
         let offset = self.indirect_offset;
-        self.indirect_offset += *helper as vk::DeviceSize;
+        self.indirect_offset +=
+            (*helper as usize * size_of::<vk::DrawIndexedIndirectCommand>()) as vk::DeviceSize;
 
         self.batch_offset += 1;
         self.helper_offset += 1;

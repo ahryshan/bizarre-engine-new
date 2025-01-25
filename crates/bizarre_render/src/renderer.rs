@@ -247,7 +247,7 @@ impl VulkanRenderer {
             inst_handle,
             pipeline,
             pipeline_layout,
-            indirect_offset: offset,
+            indirect_offset,
             count,
             batch_offset,
             batch_range,
@@ -286,7 +286,7 @@ impl VulkanRenderer {
                 device.cmd_draw_indexed_indirect(
                     cmd_buffer,
                     indirect_buffer.buffer(),
-                    offset,
+                    indirect_offset,
                     count,
                     size_of::<vk::DrawIndexedIndirectCommand>() as u32,
                 )

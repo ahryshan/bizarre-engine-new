@@ -29,8 +29,8 @@ impl From<&MaterialBinding> for vk::DescriptorSetLayoutBinding<'_> {
     }
 }
 
-pub const fn base_scene_bindings() -> &'static [MaterialBinding] {
-    &[
+pub fn base_scene_bindings() -> Vec<MaterialBinding> {
+    [
         MaterialBinding {
             set: 0,
             binding: 0,
@@ -48,6 +48,7 @@ pub const fn base_scene_bindings() -> &'static [MaterialBinding] {
             shader_stage_flags: ShaderStageFlags::VERTEX,
         },
     ]
+    .to_vec()
 }
 
 #[derive(Debug, Clone, Copy)]
