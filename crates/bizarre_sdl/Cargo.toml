@@ -1,0 +1,11 @@
+[package]
+name = "bizarre_sdl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
+bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
+
+nalgebra-glm = { workspace = true }
+sdl2 = "0.37.0"

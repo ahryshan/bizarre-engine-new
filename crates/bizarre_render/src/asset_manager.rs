@@ -2,14 +2,13 @@ use std::{collections::HashMap, ffi::c_void, path::Path};
 
 use std::fmt::Debug;
 
-use ash::vk;
+use ash::vk::{self, Handle as _};
 use bizarre_core::{
     handle::{DenseHandleStrategy, HandlePlacement, HandleStrategy, SparseHandleStrategy},
     Handle,
 };
 use bizarre_ecs::prelude::Resource;
 use bizarre_log::core_info;
-use bizarre_window::Window;
 use nalgebra_glm::UVec2;
 
 use crate::antialiasing::Antialiasing;
@@ -147,31 +146,24 @@ impl RenderAssets {
         self.meshes.insert(mesh)
     }
 
-    pub fn create_present_target(
+    pub fn create_present_target2(
         &mut self,
-        window: &Window,
+        window: &bizarre_sdl::window::Window,
         image_count: u32,
     ) -> PresentTargetHandle {
-        let device = get_device();
+        let instance_handle = get_instance().handle().as_raw() as usize;
+        let surface = window.vulkan_create_surface(instance_handle).unwrap();
+        let surface = vk::SurfaceKHR::from_raw(surface);
 
-        let data = unsafe {
-            let display = bizarre_window::get_wayland_display_ptr() as *mut vk::wl_display;
-            let surface = window.raw_window_ptr() as *mut c_void;
+        let present_target = PresentTarget::new2(
+            get_device().cmd_pool,
+            image_count,
+            surface,
+            window.id() as usize,
+        )
+        .unwrap();
 
-            PresentTarget::new(
-                device.cmd_pool,
-                image_count,
-                window.size(),
-                display,
-                surface,
-                window.handle().as_raw(),
-            )
-            .unwrap()
-        };
-
-        let handle = self.present_targets.insert(data);
-
-        handle
+        self.present_targets.insert(present_target)
     }
 
     pub fn present_target_mut(

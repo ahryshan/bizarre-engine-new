@@ -1,21 +1,23 @@
 use std::collections::{BTreeMap, VecDeque};
 
+use bizarre_core::erased_buffer::ErasedSparseArray;
 use component_batch::ComponentBatch;
 
 use crate::{
     entity::Entity,
-    resource::{ComponentBuffer, Resource, ResourceId},
+    resource::{Resource, ResourceId},
 };
 
 pub mod component_batch;
 pub mod component_commands;
+mod component_storage;
 
 pub use bizarre_ecs_proc_macro::Component;
 
 pub trait Component: Resource {}
 
 pub struct ComponentRegistry {
-    storages: Vec<Option<ComponentBuffer>>,
+    storages: Vec<Option<ErasedSparseArray>>,
     capacity: usize,
     lookup: BTreeMap<ResourceId, usize>,
     index_dumpster: VecDeque<usize>,
@@ -42,10 +44,9 @@ impl ComponentRegistry {
     pub fn expand_by(&mut self, by: usize) {
         self.capacity += by;
 
-        self.storages
-            .iter_mut()
-            .flatten()
-            .for_each(|b| b.expand_by(by));
+        self.storages.iter_mut().flatten().for_each(|b| {
+            b.grow(self.capacity);
+        });
 
         self.entities
             .extend((0..by).map(|_| (Entity::from_gen_id(0, 0), 0)));
@@ -68,13 +69,13 @@ impl ComponentRegistry {
         }
     }
 
-    pub fn storage<T: Component>(&self) -> Option<&ComponentBuffer> {
+    pub fn storage<T: Component>(&self) -> Option<&ErasedSparseArray> {
         let index = self.index::<T>()?;
 
         self.storages[index].as_ref()
     }
 
-    pub fn storage_mut<T: Component>(&mut self) -> Option<&mut ComponentBuffer> {
+    pub fn storage_mut<T: Component>(&mut self) -> Option<&mut ErasedSparseArray> {
         let index = self.index::<T>()?;
 
         self.storages[index].as_mut()
@@ -87,7 +88,7 @@ impl ComponentRegistry {
 
         let storage = self.storage::<T>()?;
 
-        storage.get(entity.index())
+        unsafe { storage.get(entity.index()) }
     }
 
     pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
@@ -97,7 +98,7 @@ impl ComponentRegistry {
 
         let storage = self.storage_mut::<T>()?;
 
-        storage.get_mut(entity.index())
+        unsafe { storage.get_mut(entity.index()) }
     }
 
     pub fn register<T: Component>(&mut self) {
@@ -105,7 +106,7 @@ impl ComponentRegistry {
             return;
         }
 
-        let new_storage = ComponentBuffer::with_capacity::<T>(self.capacity);
+        let new_storage = ErasedSparseArray::with_capacity::<T>(self.capacity);
         let index = if let Some(index) = self.index_dumpster.pop_front() {
             self.storages[index] = Some(new_storage);
             self.component_bitmasks[index] = 1 << index;
@@ -133,10 +134,12 @@ impl ComponentRegistry {
         *stored_entity = entity;
         *bitmask |= self.component_bitmasks[index];
 
-        self.storages[index]
-            .as_mut()
-            .unwrap()
-            .insert(entity.index(), component)
+        unsafe {
+            self.storages[index]
+                .as_mut()
+                .unwrap()
+                .insert(entity.index(), component)
+        }
     }
 
     pub fn insert_batch<T: ComponentBatch>(&mut self, entity: Entity, batch: T) {
@@ -151,17 +154,19 @@ impl ComponentRegistry {
 
         let index = self.index::<T>()?;
 
-        self.storages[index]
-            .as_mut()
-            .unwrap()
-            .remove::<T>(entity.index())
+        unsafe {
+            self.storages[index]
+                .as_mut()
+                .unwrap()
+                .remove::<T>(entity.index())
+        }
     }
 
     pub fn remove_batch<T: ComponentBatch>(&mut self, entity: Entity) {
         T::remove(self, entity);
     }
 
-    pub fn remove_storage<T: Component>(&mut self) -> Option<ComponentBuffer> {
+    pub fn remove_storage<T: Component>(&mut self) -> Option<ErasedSparseArray> {
         let index = self.index::<T>()?;
 
         let ret = self.storages[index].take();
@@ -213,7 +218,7 @@ impl ComponentRegistry {
         self.has_entity(entity)
             && self
                 .storage::<T>()
-                .map(|s| s.is_valid(entity.index()))
+                .map(|s| s.contains(entity.index()))
                 .unwrap_or(false)
     }
 
@@ -228,7 +233,7 @@ impl ComponentRegistry {
         self.has_entity(entity)
             && self.storages[index]
                 .as_ref()
-                .map(|s| s.is_valid(entity.index()))
+                .map(|s| s.contains(entity.index()))
                 .unwrap_or(false)
     }
 

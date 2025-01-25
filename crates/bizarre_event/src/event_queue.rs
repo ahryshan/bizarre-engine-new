@@ -70,11 +70,16 @@ impl EventQueue {
         self.get_queue_mut::<E>()?.poll_event(reader)
     }
 
-    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Option<Box<[E]>>
+    pub fn pull_events<E>(&mut self, reader: &EventReader) -> Vec<E>
     where
         E: Event + Clone,
     {
-        self.get_queue_mut::<E>()?.pull_events(reader)
+        let queue = self.get_queue_mut::<E>();
+        if let Some(queue) = queue {
+            queue.pull_events(reader)
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn change_frames(&mut self) {

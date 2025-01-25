@@ -1,5 +1,6 @@
 #version 450
-#extension GL_EXT_nonuniform_qualifier: enable
+
+#define MAX_UNIFORM_LENGTH 1024
 
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
@@ -13,9 +14,13 @@ layout(set = 0, binding = 0) uniform SceneUniform {
     mat4 projection;
 } scene_ubo;
 
-layout(set = 0, binding = 1) uniform InstanceTransformsUbo {
+struct InstanceData {
     mat4 transform;
-} instance_transforms_ubo[];
+} instance_data;
+
+layout(set = 0, binding = 1) uniform InstanceUbo {
+    InstanceData data[MAX_UNIFORM_LENGTH];
+} instance_ubo;
 
 mat4 view = {
     {1.0, 0.0, -0.0, 0.0},
@@ -32,7 +37,8 @@ mat4 projection = {
 };
 
 void main() {
-    mat4 instance_transform = instance_transforms_ubo[gl_InstanceIndex].transform;
+    mat4 instance_transform = instance_ubo.data[gl_InstanceIndex].transform;
+    // mat4 instance_transform = instance_transforms_ubo.transform[gl_InstanceIndex];
 
     vec4 pos = scene_ubo.projection * scene_ubo.view * instance_transform * vec4(in_position, 1.0);
     gl_Position = pos;

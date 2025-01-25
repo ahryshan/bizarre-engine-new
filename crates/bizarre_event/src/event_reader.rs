@@ -17,20 +17,24 @@ pub struct EventReader {
 }
 
 pub struct Events<T: Event> {
-    events: Option<Box<[T]>>,
+    events: Vec<T>,
 }
 
 impl<T: Event> Deref for Events<T> {
-    type Target = Option<Box<[T]>>;
+    type Target = [T];
 
     fn deref(&self) -> &Self::Target {
         &self.events
     }
 }
 
-impl<T: Event> DerefMut for Events<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.events
+impl<T: Event> IntoIterator for Events<T> {
+    type Item = T;
+
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.events.into_iter()
     }
 }
 

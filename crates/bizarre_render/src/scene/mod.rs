@@ -6,12 +6,15 @@ use std::{
 use ash::vk;
 use bitflags::bitflags;
 use bizarre_core::{handle::HandleStrategy, Handle};
+use bizarre_ecs::prelude::Component;
 use bizarre_log::{core_info, core_trace};
 use nalgebra_glm::Mat4;
 use render_batch::RenderBatch;
 use render_object::{RenderObject, RenderObjectMaterials};
 use scene_frame::SceneFrameData;
 use thiserror::Error;
+
+use bizarre_ecs::prelude::*;
 
 use crate::{
     asset_manager::AssetStore,
@@ -38,7 +41,7 @@ pub enum SceneError {
 
 pub type SceneResult<T> = Result<T, SceneError>;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Component)]
 pub struct RenderObjectId(usize);
 
 const INITIAL_VERTEX_LEN: usize = 10_000;
@@ -54,7 +57,7 @@ pub struct SceneUniform {
 }
 
 #[repr(C, align(4))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InstanceData {
     pub transform: Mat4,
 }

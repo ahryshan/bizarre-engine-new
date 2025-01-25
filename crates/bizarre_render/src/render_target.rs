@@ -3,7 +3,7 @@ use std::ptr::addr_of;
 
 use ash::vk::{self};
 use bizarre_core::Handle;
-use bizarre_log::{core_fatal, core_info};
+use bizarre_log::{core_error, core_fatal, core_info};
 use nalgebra_glm::UVec2;
 
 use crate::{
@@ -56,6 +56,10 @@ impl SwapchainRenderTarget {
             targets,
             curr_image_index: 0,
         })
+    }
+
+    pub fn resize(&mut self, size: UVec2) -> RenderingResult<()> {
+        self.current_target_mut().resize(size)
     }
 
     pub fn output_image(&self) -> &VulkanImage {
@@ -169,6 +173,8 @@ impl ImageRenderTarget {
             device.create_fence(&create_info, None)?
         };
 
+        device.set_object_debug_name(in_flight_fence, "ImageRenderTarget::in_flight_fence");
+
         let cmd_buffer = {
             let allocate_info = vk::CommandBufferAllocateInfo::default()
                 .command_pool(cmd_pool)
@@ -183,6 +189,8 @@ impl ImageRenderTarget {
                     .to_owned()
             }
         };
+
+        device.set_object_debug_name(cmd_buffer, "ImageRenderTarget::render_cmd_buffer");
 
         let color_attachment = VulkanImage::attachment_image(size, samples)?;
         let normals_attachment = VulkanImage::attachment_image(size, samples)?;
@@ -199,6 +207,8 @@ impl ImageRenderTarget {
             let create_info = vk::SemaphoreCreateInfo::default();
             unsafe { device.create_semaphore(&create_info, None)? }
         };
+
+        device.set_object_debug_name(render_ready, "ImageRenderTarget::render_complete");
 
         Ok(Self {
             render_cmd_buffer: cmd_buffer,
@@ -233,6 +243,31 @@ impl ImageRenderTarget {
         self.resolve_attachment
             .as_mut()
             .unwrap_or(&mut self.output_attachment)
+    }
+
+    pub fn resize(&mut self, size: UVec2) -> RenderingResult<()> {
+        if size <= self.size {
+            return Ok(());
+        }
+
+        [
+            &mut self.color_attachment,
+            &mut self.normals_attachment,
+            &mut self.position_depth_attachment,
+            &mut self.output_attachment,
+            &mut self.depth_image,
+        ]
+        .iter_mut()
+        .map(|image| image.resize(size))
+        .collect::<Result<(), _>>()?;
+
+        if let Some(image) = &mut self.resolve_attachment {
+            image.resize(size)?;
+        }
+
+        self.size = size;
+
+        Ok(())
     }
 
     pub fn begin_rendering(&mut self, device: &LogicalDevice) -> RenderingResult<RenderData2> {
@@ -499,8 +534,11 @@ impl Drop for ImageRenderTarget {
         let device = get_device();
 
         unsafe {
-            device.destroy_semaphore(self.render_complete, None);
+            if let Err(err) = device.wait_for_fences(&[self.in_flight_fence], true, u64::MAX) {
+                core_error!("ImageRenderTarget::drop: failed to wait for fences: {err}");
+            }
             device.destroy_fence(self.in_flight_fence, None);
+            device.destroy_semaphore(self.render_complete, None);
         }
     }
 }

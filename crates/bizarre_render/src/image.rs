@@ -16,6 +16,8 @@ pub struct VulkanImage {
     pub level_count: u32,
     pub layer_count: u32,
     pub size: UVec2,
+    pub samples: vk::SampleCountFlags,
+    pub usage: vk::ImageUsageFlags,
 }
 
 impl VulkanImage {
@@ -117,7 +119,70 @@ impl VulkanImage {
             size,
             image_layout: vk::ImageLayout::UNDEFINED,
             aspect_mask,
+            samples,
+            usage,
         })
+    }
+
+    pub fn resize(&mut self, size: UVec2) -> Result<(), vk::Result> {
+        if size <= self.size {
+            return Ok(());
+        }
+
+        let device = get_device();
+
+        unsafe {
+            device.destroy_image_view(self.image_view, None);
+            device
+                .allocator
+                .destroy_image(self.image, &mut self.allocation);
+        }
+
+        let (image, allocation) = {
+            let image_info = vk::ImageCreateInfo::default()
+                .image_type(vk::ImageType::TYPE_2D)
+                .samples(self.samples)
+                .extent(vk::Extent3D {
+                    width: size.x,
+                    height: size.y,
+                    depth: 1,
+                })
+                .format(self.format)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .usage(self.usage)
+                .mip_levels(self.layer_count)
+                .array_layers(self.level_count);
+
+            let create_info = vma::AllocationCreateInfo {
+                usage: vma::MemoryUsage::Auto,
+                ..Default::default()
+            };
+
+            unsafe { device.allocator.create_image(&image_info, &create_info)? }
+        };
+
+        let image_view = {
+            let create_info = vk::ImageViewCreateInfo::default()
+                .image(image)
+                .format(self.format)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: self.aspect_mask,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            unsafe { device.create_image_view(&create_info, None) }?
+        };
+
+        self.image = image;
+        self.allocation = allocation;
+        self.image_view = image_view;
+        self.size = size;
+        self.image_layout = vk::ImageLayout::UNDEFINED;
+
+        Ok(())
     }
 
     pub fn image_view_custom(

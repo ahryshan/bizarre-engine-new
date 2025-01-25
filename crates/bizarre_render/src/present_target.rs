@@ -2,7 +2,7 @@ use std::ffi::c_void;
 
 use ash::{nv::shader_subgroup_partitioned, vk};
 use bizarre_core::{handle::IntoHandle, Handle};
-use bizarre_log::{core_info, core_trace, core_warn};
+use bizarre_log::{core_error, core_info, core_trace, core_warn};
 use nalgebra_glm::UVec2;
 use thiserror::Error;
 
@@ -24,6 +24,8 @@ pub enum PresentError {
     InvalidPresentTarget,
     #[error(transparent)]
     VulkanError(#[from] vk::Result),
+    #[error("Present must be skipped")]
+    PresentSkipped,
 }
 
 pub type PresentResult<T> = Result<T, PresentError>;
@@ -40,6 +42,7 @@ pub struct PresentData {
     pub swapchain: vk::SwapchainKHR,
     pub image_acquired: vk::Semaphore,
     pub image_ready: vk::Semaphore,
+    pub image_ready_fence: vk::Fence,
     pub image_index: u32,
 }
 
@@ -90,7 +93,9 @@ pub struct PresentTarget {
     image_views: Vec<vk::ImageView>,
     present_cmd_buffers: Vec<vk::CommandBuffer>,
     image_acquired: Vec<vk::Semaphore>,
+    image_acquired_fences: Vec<vk::Fence>,
     image_ready: Vec<vk::Semaphore>,
+    image_ready_fences: Vec<vk::Fence>,
 
     next_image_index: u32,
 }
@@ -102,6 +107,122 @@ impl IntoHandle for PresentTarget {
 }
 
 impl PresentTarget {
+    pub(crate) fn new2(
+        cmd_pool: vk::CommandPool,
+        image_count: u32,
+        surface: vk::SurfaceKHR,
+        window_id: usize,
+    ) -> Result<Self, vk::Result> {
+        let instance = get_instance();
+        let device = get_device();
+
+        let swapchain_loader =
+            ash::khr::swapchain::Device::new(&instance.instance, &device.logical);
+
+        let support = SwapchainSupportInfo::query_support_info(instance, *device.physical, surface);
+
+        let present_mode = choose_present_mode(&support.present_modes);
+        let format = choose_surface_format(&support.formats);
+
+        let (extent, swapchain, images, image_views) = create_swapchain(
+            device,
+            &swapchain_loader,
+            image_count,
+            present_mode,
+            *format,
+            surface,
+            None,
+        )
+        .unwrap();
+
+        let surface_loader = ash::khr::surface::Instance::new(&instance.entry, &instance.instance);
+
+        let present_cmd_buffers = {
+            let allocate_info = vk::CommandBufferAllocateInfo::default()
+                .command_pool(cmd_pool)
+                .command_buffer_count(images.len() as u32)
+                .level(vk::CommandBufferLevel::PRIMARY);
+
+            unsafe { device.allocate_command_buffers(&allocate_info) }?
+        };
+
+        present_cmd_buffers
+            .iter()
+            .for_each(|cmd| device.set_object_debug_name(*cmd, "PresentTarget::present_cmd"));
+
+        let image_acquired = images
+            .iter()
+            .map(|_| {
+                let create_info = vk::SemaphoreCreateInfo::default();
+                unsafe { device.create_semaphore(&create_info, None) }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        image_acquired
+            .iter()
+            .for_each(|sp| device.set_object_debug_name(*sp, "PresentTarget::image_acquired"));
+
+        let image_acquired_fences = images
+            .iter()
+            .map(|_| {
+                let create_info =
+                    vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+                unsafe { device.create_fence(&create_info, None) }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        image_acquired_fences.iter().for_each(|fence| {
+            device.set_object_debug_name(*fence, "PresentTarget::image_acquired")
+        });
+
+        let image_ready = images
+            .iter()
+            .map(|_| {
+                let create_info = vk::SemaphoreCreateInfo::default();
+                unsafe { device.create_semaphore(&create_info, None) }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        image_ready
+            .iter()
+            .for_each(|sp| device.set_object_debug_name(*sp, "PresentTarget::image_ready"));
+
+        let image_ready_fences = images
+            .iter()
+            .map(|_| {
+                let create_info =
+                    vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+                unsafe { device.create_fence(&create_info, None) }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        image_ready_fences
+            .iter()
+            .for_each(|fence| device.set_object_debug_name(*fence, "PresentTarget::image_ready"));
+
+        let present_target = Self {
+            surface_loader,
+            surface,
+            swapchain_loader,
+            swapchain,
+            surface_format: *format,
+            present_mode,
+            images,
+            size: UVec2::new(extent.width, extent.height),
+            image_views,
+            present_cmd_buffers,
+            image_acquired,
+            image_acquired_fences,
+            image_ready,
+            image_ready_fences,
+            window_id,
+
+            next_image_index: 0,
+        };
+
+        Ok(present_target)
+    }
+
     pub(crate) unsafe fn new(
         cmd_pool: vk::CommandPool,
         image_count: u32,
@@ -122,93 +243,46 @@ impl PresentTarget {
 
         let surface = wl_surface_loader.create_wayland_surface(&create_info, None)?;
 
-        let swapchain_loader =
-            ash::khr::swapchain::Device::new(&instance.instance, &device.logical);
-
-        let support = SwapchainSupportInfo::query_support_info(instance, *device.physical, surface);
-
-        let present_mode = choose_present_mode(&support.present_modes);
-        let format = choose_surface_format(&support.formats);
-
-        let extent = {
-            if support.capabilities.current_extent.width != u32::MAX {
-                support.capabilities.current_extent
-            } else {
-                vk::Extent2D {
-                    width: extent.x,
-                    height: extent.y,
-                }
-            }
-        };
-
-        // let image_count = if support.capabilities.max_image_count > 0 {
-        //     (support.capabilities.min_image_count + 1).min(support.capabilities.max_image_count)
-        // } else {
-        //     support.capabilities.min_image_count + 1
-        // };
-
-        let (swapchain, images, image_views) = create_swapchain(
-            device,
-            &swapchain_loader,
-            extent,
-            image_count,
-            present_mode,
-            *format,
-            surface,
-            None,
-        )
-        .unwrap();
-
-        let surface_loader = ash::khr::surface::Instance::new(&instance.entry, &instance.instance);
-
-        let present_cmd_buffers = {
-            let allocate_info = vk::CommandBufferAllocateInfo::default()
-                .command_pool(cmd_pool)
-                .command_buffer_count(images.len() as u32)
-                .level(vk::CommandBufferLevel::PRIMARY);
-
-            device.allocate_command_buffers(&allocate_info)?
-        };
-
-        let image_acquired = images
-            .iter()
-            .map(|_| {
-                let create_info = vk::SemaphoreCreateInfo::default();
-                device.create_semaphore(&create_info, None)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let image_ready = images
-            .iter()
-            .map(|_| {
-                let create_info = vk::SemaphoreCreateInfo::default();
-                device.create_semaphore(&create_info, None)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let present_target = Self {
-            surface_loader,
-            surface,
-            swapchain_loader,
-            swapchain,
-            surface_format: *format,
-            present_mode,
-            images,
-            size: UVec2::new(extent.width, extent.height),
-            image_views,
-            present_cmd_buffers,
-            image_acquired,
-            image_ready,
-            window_id,
-
-            next_image_index: 0,
-        };
-
-        Ok(present_target)
+        Self::new2(cmd_pool, image_count, surface, window_id)
     }
 
     pub fn image_count(&self) -> u32 {
         self.images.len() as u32
+    }
+
+    fn acquire_or_recreate(&mut self, skip_if_suboptimal: bool) -> (u32, vk::Semaphore, vk::Fence) {
+        let device = get_device();
+
+        let image_acquired = {
+            let create_info = vk::SemaphoreCreateInfo::default();
+            unsafe { device.create_semaphore(&create_info, None).unwrap() }
+        };
+
+        device.set_object_debug_name(image_acquired, "PresentTarget::image_acquired");
+
+        let image_acquired_fence = unsafe {
+            let create_info = vk::FenceCreateInfo::default();
+            let fence = device.create_fence(&create_info, None).unwrap();
+            device.set_object_debug_name(fence, "PresentTarget::image_acquired");
+            fence
+        };
+
+        let (image_index, suboptimal) = unsafe {
+            self.swapchain_loader
+                .acquire_next_image(self.swapchain, 1, image_acquired, image_acquired_fence)
+                .unwrap()
+        };
+
+        if suboptimal && !skip_if_suboptimal {
+            unsafe {
+                device.destroy_semaphore(image_acquired, None);
+            }
+            core_warn!("Swapchain is suboptimal! Recreating...");
+            self.recreate_swapchain().unwrap();
+            self.acquire_or_recreate(true)
+        } else {
+            (image_index, image_acquired, image_acquired_fence)
+        }
     }
 
     pub fn record_present(
@@ -216,31 +290,26 @@ impl PresentTarget {
         device: &LogicalDevice,
         render_image: &VulkanImage,
     ) -> PresentResult<PresentData> {
-        let image_acquired = {
-            let create_info = vk::SemaphoreCreateInfo::default();
-            unsafe { device.create_semaphore(&create_info, None)? }
-        };
-
-        let (image_index, suboptimal) = unsafe {
-            self.swapchain_loader
-                .acquire_next_image(self.swapchain, u64::MAX, image_acquired, vk::Fence::null())
-                .unwrap()
-        };
-
-        if suboptimal {
-            core_warn!("Swapchain is suboptimal!");
-        }
+        let (image_index, image_acquired, image_acquired_fence) = self.acquire_or_recreate(false);
 
         let old_semaphore = &mut self.image_acquired[image_index as usize];
+        let old_fence = &mut self.image_acquired_fences[image_index as usize];
 
         unsafe {
             device.destroy_semaphore(*old_semaphore, None);
             *old_semaphore = image_acquired;
+            device.destroy_fence(*old_fence, None);
+            *old_fence = image_acquired_fence;
+        }
+
+        if self.size.x == 0 || self.size.y == 0 {
+            return Err(PresentError::PresentSkipped);
         }
 
         let cmd = self.present_cmd_buffers[image_index as usize];
         let image = self.images[image_index as usize];
         let image_ready = self.image_ready[image_index as usize];
+        let image_ready_fence = self.image_ready_fences[image_index as usize];
 
         self.record_present_cmd(device, cmd, image, render_image)?;
 
@@ -249,6 +318,7 @@ impl PresentTarget {
             swapchain: self.swapchain,
             image_acquired,
             image_ready,
+            image_ready_fence,
             image_index,
         })
     }
@@ -356,17 +426,12 @@ impl PresentTarget {
         self.size
     }
 
-    pub fn resize(&mut self, size: UVec2) -> PresentResult<()> {
+    fn recreate_swapchain(&mut self) -> PresentResult<()> {
         let device = get_device();
 
-        let extent = vk::Extent2D {
-            width: size.x,
-            height: size.y,
-        };
-        let (swapchain, images, image_views) = create_swapchain(
+        let (extent, swapchain, images, image_views) = create_swapchain(
             device,
             &self.swapchain_loader,
-            extent,
             self.images.len() as u32,
             self.present_mode,
             self.surface_format,
@@ -375,6 +440,16 @@ impl PresentTarget {
         )?;
 
         unsafe {
+            let fences = [
+                self.image_ready_fences.clone(),
+                self.image_acquired_fences.clone(),
+            ]
+            .concat();
+
+            if let Err(err) = device.wait_for_fences(&fences, true, u64::MAX) {
+                core_error!("PresentTarget::recreate_swapchain: failed to wait for fences: {err:?}",)
+            }
+
             self.image_views
                 .drain(..)
                 .for_each(|view| device.destroy_image_view(view, None));
@@ -386,14 +461,27 @@ impl PresentTarget {
         self.swapchain = swapchain;
         self.images = images;
         self.image_views = image_views;
-
-        self.size = size;
+        self.size = UVec2::new(extent.width, extent.height);
 
         Ok(())
     }
 
+    pub fn resize(&mut self) -> PresentResult<()> {
+        self.recreate_swapchain()
+    }
+
     pub fn destroy(&mut self) {
         let device = get_device();
+
+        let fences = [
+            self.image_ready_fences.clone(),
+            self.image_acquired_fences.clone(),
+        ]
+        .concat();
+
+        if let Err(err) = unsafe { device.wait_for_fences(&fences, true, u64::MAX) } {
+            core_error!("PresentTarget::recreate_swapchain: failed to wait for fences: {err:?}",)
+        }
 
         self.image_views
             .drain(..)
@@ -449,13 +537,32 @@ fn choose_present_mode(modes: &Vec<vk::PresentModeKHR>) -> vk::PresentModeKHR {
 fn create_swapchain(
     device: &LogicalDevice,
     swapchain_loader: &ash::khr::swapchain::Device,
-    extent: vk::Extent2D,
     image_count: u32,
     present_mode: vk::PresentModeKHR,
     format: vk::SurfaceFormatKHR,
     surface: vk::SurfaceKHR,
     old_swapchain: Option<vk::SwapchainKHR>,
-) -> Result<(vk::SwapchainKHR, Vec<vk::Image>, Vec<vk::ImageView>), vk::Result> {
+) -> Result<
+    (
+        vk::Extent2D,
+        vk::SwapchainKHR,
+        Vec<vk::Image>,
+        Vec<vk::ImageView>,
+    ),
+    vk::Result,
+> {
+    let surface_capabilities = {
+        let instance = get_instance();
+        let instance_ext = ash::khr::surface::Instance::new(&instance.entry, &instance.instance);
+
+        unsafe {
+            instance_ext
+                .get_physical_device_surface_capabilities(get_device().physical.device, surface)
+        }
+    };
+
+    let extent = surface_capabilities.unwrap().current_extent;
+
     let create_info = vk::SwapchainCreateInfoKHR::default()
         .surface(surface)
         .image_array_layers(1)
@@ -519,5 +626,5 @@ fn create_swapchain(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok((swapchain, images, image_views))
+    Ok((extent, swapchain, images, image_views))
 }

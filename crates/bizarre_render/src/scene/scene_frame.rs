@@ -1,9 +1,10 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref};
 
 use bitflags::bitflags;
 
 use ash::vk;
 use bizarre_core::handle::HandleStrategy;
+use bizarre_log::core_trace;
 
 use crate::{
     asset_manager::AssetStore,
@@ -159,7 +160,10 @@ impl SceneFrameData {
     #[inline]
     fn handle_add(&mut self, render_object_id: RenderObjectId, render_object: RenderObject) {
         if render_object_id.0 >= self.instance_mapping.len() {
-            self.instance_mapping.reserve(1);
+            let additional: Vec<Option<(usize, usize)>> =
+                vec![None; render_object_id.0 - self.instance_mapping.len() + 1];
+
+            self.instance_mapping.extend(additional.into_iter());
         }
 
         let batch_id = self.batches.iter().position(|batch| {
@@ -180,9 +184,10 @@ impl SceneFrameData {
 
                 self.instance_data
                     .insert(batch.offset + object_idx, render_object.instance_data);
+
                 self.instance_mapping[render_object_id.0] = Some((batch_id, object_idx));
 
-                self.batches[batch_id..]
+                self.batches[batch_id + 1..]
                     .iter_mut()
                     .for_each(|batch| batch.offset += 1);
 
@@ -209,7 +214,7 @@ impl SceneFrameData {
                 .insert(SceneFrameFlags::NEED_INSTANCE_DATA_REBUILD);
 
             self.instance_data.push(render_object.instance_data);
-            self.instance_mapping.push(Some((batch_id, 0)));
+            self.instance_mapping[render_object_id.0] = Some((batch_id, 0));
 
             if !self.mesh_map.contains_key(&render_object.mesh) {
                 self.flags.insert(SceneFrameFlags::NEED_MESH_REBUILD);
@@ -232,6 +237,8 @@ impl SceneFrameData {
 
         let global_offset = batch.offset + object_id;
         self.instance_data[global_offset] = instance_data;
+
+        self.flags.insert(SceneFrameFlags::NEED_INSTANCE_DATA_SYNC);
     }
 
     #[inline]
