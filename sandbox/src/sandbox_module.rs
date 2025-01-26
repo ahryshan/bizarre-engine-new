@@ -6,12 +6,12 @@ use bizarre_engine::{
     log::info,
     prelude::ComponentBatch,
     render::{
-        asset_manager::RenderAssets,
         material::{
             builtin::with_basic_deferred, material_instance::MaterialInstanceHandle,
             pipeline::ShaderStageDefinition,
         },
         mesh::MeshHandle,
+        render_assets::RenderAssets,
         scene::{
             render_object::{
                 RenderObject, RenderObjectFlags, RenderObjectMaterials, RenderObjectMeta,
@@ -105,7 +105,7 @@ fn setup_cubes(mut assets: ResMut<RenderAssets>, scene_handle: Res<MainScene>, m
                 let meta = RenderObjectMeta {
                     flags: RenderObjectFlags::empty(),
                     materials: RenderObjectMaterials::new(instance_handle),
-                    mesh: MeshHandle::from_raw(1usize),
+                    mesh: MeshHandle::from_raw(0usize),
                 };
 
                 let instance_data = CubeInstanceData {
@@ -118,8 +118,8 @@ fn setup_cubes(mut assets: ResMut<RenderAssets>, scene_handle: Res<MainScene>, m
             } else {
                 let meta = RenderObjectMeta {
                     flags: RenderObjectFlags::empty(),
-                    materials: RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(1usize)),
-                    mesh: MeshHandle::from_raw(1usize),
+                    materials: RenderObjectMaterials::new(MaterialInstanceHandle::from_raw(0usize)),
+                    mesh: MeshHandle::from_raw(0usize),
                 };
 
                 let instance_data = InstanceData {

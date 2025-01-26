@@ -3,6 +3,7 @@ use std::{collections::HashMap, ffi::c_void, path::Path};
 use std::fmt::Debug;
 
 use ash::vk::{self, Handle as _};
+use bizarre_core::handle::IntoHandle;
 use bizarre_core::{
     handle::{DenseHandleStrategy, HandlePlacement, HandleStrategy, SparseHandleStrategy},
     Handle,
@@ -26,13 +27,24 @@ use crate::{
     vulkan_context::{get_device, get_instance},
 };
 
-#[derive(Resource)]
-pub struct AssetStore<A: 'static, S: 'static> {
-    data: HashMap<Handle<A>, A>,
-    handle_strategy: S,
+pub trait AssetStore<A, S: HandleStrategy<A>> {
+    fn insert(&mut self, asset: A) -> Handle<A>;
+
+    fn contains(&self, handle: &Handle<A>) -> HandlePlacement;
+
+    fn remove(&mut self, handle: Handle<A>) -> Option<A>;
+
+    fn get(&self, handle: &Handle<A>) -> Option<&A>;
+
+    fn get_mut(&mut self, handle: &Handle<A>) -> Option<&mut A>;
 }
 
-impl<A, S: Default> Default for AssetStore<A, S> {
+pub struct SparseAssetStore<A> {
+    data: HashMap<Handle<A>, A>,
+    handle_strategy: SparseHandleStrategy<A>,
+}
+
+impl<T> Default for SparseAssetStore<T> {
     fn default() -> Self {
         Self {
             data: Default::default(),
@@ -41,46 +53,85 @@ impl<A, S: Default> Default for AssetStore<A, S> {
     }
 }
 
-impl<A, S: HandleStrategy<A> + Default> AssetStore<A, S> {
+impl<A> SparseAssetStore<A> {
     pub fn new() -> Self {
         Default::default()
     }
 }
 
-impl<A, S: HandleStrategy<A>> AssetStore<A, S> {
-    pub fn with_strategy(handle_strategy: S) -> Self {
-        Self {
-            handle_strategy,
-            data: Default::default(),
-        }
-    }
-
-    pub fn insert(&mut self, asset: A) -> Handle<A> {
-        let handle = self.handle_strategy.new_handle(&asset);
+impl<A: IntoHandle> AssetStore<A, SparseHandleStrategy<A>> for SparseAssetStore<A> {
+    fn insert(&mut self, asset: A) -> Handle<A> {
+        let (handle, _) = self.handle_strategy.new_handle(&asset);
         self.data.insert(handle, asset);
         handle
     }
 
-    pub fn contains(&self, handle: Handle<A>) -> HandlePlacement {
+    fn contains(&self, handle: &Handle<A>) -> HandlePlacement {
         self.handle_strategy.handle_placement(&handle)
     }
 
-    pub fn delete(&mut self, handle: Handle<A>) -> Option<A> {
+    fn remove(&mut self, handle: Handle<A>) -> Option<A> {
         self.handle_strategy.mark_deleted(handle);
         self.data.remove(&handle)
     }
 
-    pub fn get(&self, handle: &Handle<A>) -> Option<&A> {
+    fn get(&self, handle: &Handle<A>) -> Option<&A> {
         self.data.get(handle)
     }
 
-    pub fn get_mut(&mut self, handle: &Handle<A>) -> Option<&mut A> {
+    fn get_mut(&mut self, handle: &Handle<A>) -> Option<&mut A> {
         self.data.get_mut(handle)
     }
 }
 
-pub type DenseAssetStore<T> = AssetStore<T, DenseHandleStrategy<T>>;
-pub type SparseAssetStore<T> = AssetStore<T, SparseHandleStrategy<T>>;
+pub struct DenseAssetStore<T> {
+    data: Vec<Option<T>>,
+    handle_strategy: DenseHandleStrategy<T>,
+}
+
+impl<T> Default for DenseAssetStore<T> {
+    fn default() -> Self {
+        Self {
+            data: Default::default(),
+            handle_strategy: Default::default(),
+        }
+    }
+}
+
+impl<T> AssetStore<T, DenseHandleStrategy<T>> for DenseAssetStore<T> {
+    fn insert(&mut self, asset: T) -> Handle<T> {
+        let (handle, reused) = self.handle_strategy.new_handle(&asset);
+
+        if reused {
+            self.data[handle.as_raw()] = Some(asset);
+        } else {
+            self.data.push(Some(asset))
+        }
+
+        handle
+    }
+
+    fn contains(&self, handle: &Handle<T>) -> HandlePlacement {
+        self.handle_strategy.handle_placement(&handle)
+    }
+
+    fn remove(&mut self, handle: Handle<T>) -> Option<T> {
+        let value = match self.contains(&handle) {
+            HandlePlacement::Present => self.data[handle.as_raw()].take(),
+            _ => None,
+        };
+        self.handle_strategy.mark_deleted(handle);
+        value
+    }
+
+    fn get(&self, handle: &Handle<T>) -> Option<&T> {
+        self.data.get(handle.as_raw())?.as_ref()
+    }
+
+    fn get_mut(&mut self, handle: &Handle<T>) -> Option<&mut T> {
+        self.data.get_mut(handle.as_raw())?.as_mut()
+    }
+}
 
 #[derive(Default, Resource)]
 pub struct RenderAssets {

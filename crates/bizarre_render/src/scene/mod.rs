@@ -18,9 +18,9 @@ use thiserror::Error;
 use bizarre_ecs::prelude::*;
 
 use crate::{
-    asset_manager::AssetStore,
     buffer::{BufferError, GpuBuffer},
     mesh::{Mesh, MeshHandle},
+    render_assets::{AssetStore, DenseAssetStore},
     vertex::Vertex,
 };
 
@@ -118,7 +118,11 @@ impl Scene {
         self.frames[self.current_frame].index_buffer.buffer()
     }
 
-    pub fn sync_frame_data<S: HandleStrategy<Mesh>>(&mut self, mesh_store: &AssetStore<Mesh, S>) {
+    pub fn sync_frame_data<S, A>(&mut self, mesh_store: &A)
+    where
+        S: HandleStrategy<Mesh>,
+        A: AssetStore<Mesh, S>,
+    {
         self.frames[self.current_frame].sync_frame_data(mesh_store)
     }
 

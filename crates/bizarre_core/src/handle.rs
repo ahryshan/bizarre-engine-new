@@ -30,7 +30,7 @@ impl<T> Handle<T> {
     }
 
     pub const fn null() -> Self {
-        Self::from_raw(0usize)
+        Self::from_raw(usize::MAX)
     }
 }
 
@@ -134,7 +134,7 @@ pub enum HandlePlacement {
 }
 
 pub trait HandleStrategy<T> {
-    fn new_handle(&mut self, object: &T) -> Handle<T>;
+    fn new_handle(&mut self, object: &T) -> (Handle<T>, bool);
     fn mark_deleted(&mut self, handle: Handle<T>);
     fn handle_placement(&self, handle: &Handle<T>) -> HandlePlacement;
 }
@@ -166,7 +166,7 @@ impl<T> SparseHandleStrategy<T> {
 }
 
 impl<T: IntoHandle> HandleStrategy<T> for SparseHandleStrategy<T> {
-    fn new_handle(&mut self, object: &T) -> Handle<T> {
+    fn new_handle(&mut self, object: &T) -> (Handle<T>, bool) {
         let handle = object.into_handle();
 
         if self.deleted.contains(&handle) {
@@ -174,7 +174,7 @@ impl<T: IntoHandle> HandleStrategy<T> for SparseHandleStrategy<T> {
         }
 
         self.created.insert(handle);
-        handle
+        (handle, false)
     }
 
     fn mark_deleted(&mut self, handle: Handle<T>) {
@@ -202,7 +202,7 @@ pub struct DenseHandleStrategy<T> {
 impl<T> DenseHandleStrategy<T> {
     pub fn new() -> Self {
         Self {
-            next_id: AtomicUsize::new(1),
+            next_id: AtomicUsize::new(0),
             id_dumpster: Arc::new(Mutex::new(VecDeque::new())),
             _phantom: Default::default(),
         }
@@ -216,7 +216,7 @@ impl<T> Default for DenseHandleStrategy<T> {
 }
 
 impl<T> HandleStrategy<T> for DenseHandleStrategy<T> {
-    fn new_handle(&mut self, _: &T) -> Handle<T> {
+    fn new_handle(&mut self, _: &T) -> (Handle<T>, bool) {
         let mut dumpster = self
             .id_dumpster
             .lock()
@@ -224,9 +224,9 @@ impl<T> HandleStrategy<T> for DenseHandleStrategy<T> {
 
         if dumpster.is_empty() {
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            Handle::from_raw(id)
+            (Handle::from_raw(id), false)
         } else {
-            dumpster.pop_front().unwrap()
+            (dumpster.pop_front().unwrap(), true)
         }
     }
 

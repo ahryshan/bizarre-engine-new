@@ -11,7 +11,6 @@ use bizarre_ecs::prelude::Resource;
 
 use crate::{
     antialiasing::Antialiasing,
-    asset_manager::RenderAssets,
     buffer::GpuBuffer,
     device::logical_device::DeviceError,
     image::VulkanImage,
@@ -24,6 +23,7 @@ use crate::{
         Material, MaterialHandle,
     },
     present_target::{PresentData, PresentResult, PresentTargetHandle},
+    render_assets::{AssetStore, RenderAssets},
     render_target::RenderTargetHandle,
     scene::{object_pass::SceneObjectPass, IndirectIterItem, Scene, SceneUniform},
     submitter::RenderPackage,

@@ -4,7 +4,7 @@ use bizarre_core::Handle;
 use nalgebra_glm::Vec3;
 use tobj::LoadOptions;
 
-use crate::{asset_manager::AssetStore, vertex::Vertex};
+use crate::{render_assets::DenseAssetStore, vertex::Vertex};
 
 pub type MeshHandle = Handle<Mesh>;
 

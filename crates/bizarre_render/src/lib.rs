@@ -19,12 +19,12 @@ mod macros;
 mod vulkan_context;
 
 pub mod antialiasing;
-pub mod asset_manager;
 pub mod buffer;
 pub mod ecs;
 pub mod material;
 pub mod mesh;
 pub mod present_target;
+pub mod render_assets;
 pub mod render_pass;
 pub mod render_target;
 pub mod renderer;

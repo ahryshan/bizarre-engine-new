@@ -7,9 +7,9 @@ use bizarre_core::handle::HandleStrategy;
 use bizarre_log::core_trace;
 
 use crate::{
-    asset_manager::AssetStore,
     buffer::GpuBuffer,
     mesh::{Mesh, MeshHandle},
+    render_assets::AssetStore,
     vertex::Vertex,
 };
 
@@ -107,7 +107,11 @@ impl SceneFrameData {
         Ok(frame)
     }
 
-    pub fn sync_frame_data<S: HandleStrategy<Mesh>>(&mut self, mesh_store: &AssetStore<Mesh, S>) {
+    pub fn sync_frame_data<S, A>(&mut self, mesh_store: &A)
+    where
+        S: HandleStrategy<Mesh>,
+        A: AssetStore<Mesh, S>,
+    {
         self.pending_changes
             .drain(..)
             .collect::<Vec<_>>()
@@ -398,7 +402,11 @@ impl SceneFrameData {
     }
 
     #[inline]
-    fn rebuild_mesh_data<S: HandleStrategy<Mesh>>(&mut self, mesh_store: &AssetStore<Mesh, S>) {
+    fn rebuild_mesh_data<S, A>(&mut self, mesh_store: &A)
+    where
+        S: HandleStrategy<Mesh>,
+        A: AssetStore<Mesh, S>,
+    {
         let (vertices, indices, mappings) = self.batches.iter().fold(
             (Vec::new(), Vec::new(), BTreeMap::new()),
             |(mut vertices, mut indices, mut mappings), batch| {

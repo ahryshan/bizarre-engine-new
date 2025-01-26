@@ -46,6 +46,7 @@ impl RenderBatch {
         self.instance_data.insert(at, instance_data);
     }
 
+    #[track_caller]
     pub unsafe fn insert_bytes(&mut self, at: usize, data: &[u8]) {
         if at >= self.instance_data.capacity() {
             self.instance_data.grow(at + 1);

@@ -9,9 +9,9 @@ use bizarre_engine::{
     event::Events,
     prelude::{Res, ResMut, *},
     render::{
-        asset_manager::RenderAssets,
         material::builtin::basic_deferred,
         present_target::{PresentError, PresentTargetHandle},
+        render_assets::{AssetStore, RenderAssets},
         render_target::RenderTargetHandle,
         renderer::{RenderError, VulkanRenderer},
         scene::{SceneHandle, SceneUniform},
@@ -70,11 +70,7 @@ impl EcsModule for RenderModule {
         let scene_handle = assets.create_scene(image_count);
         let scene = assets.scene_mut(&scene_handle).unwrap();
 
-        let view = look_at(
-            &Vec3::new(3.0, 20.0, 5.0),
-            &Vec3::zeros(),
-            &Vec3::new(0.0, 1.0, 0.0),
-        );
+        let view = default_view();
 
         let projection = perspective(
             width as f32 / height as f32,
@@ -93,6 +89,14 @@ impl EcsModule for RenderModule {
 
         world.add_systems(Schedule::Update, render);
     }
+}
+
+fn default_view() -> Mat4 {
+    look_at(
+        &Vec3::new(3.0, 20.0, 5.0),
+        &Vec3::zeros(),
+        &Vec3::new(0.0, 1.0, 0.0),
+    )
 }
 
 fn render(
@@ -128,11 +132,7 @@ fn render(
                     .resize(size)
                     .unwrap();
 
-                let view = look_at(
-                    &Vec3::new(3.0, 2.0, 10.0),
-                    &Vec3::zeros(),
-                    &Vec3::new(0.0, 1.0, 0.0),
-                );
+                let view = default_view();
 
                 let projection = perspective(
                     size.x as f32 / size.y as f32,
@@ -160,7 +160,7 @@ fn render(
 
     let render_package = RenderPackage {
         pov: Mat4::default(),
-        scene: SceneHandle::from_raw(1usize),
+        scene: SceneHandle::from_raw(0usize),
     };
 
     let render_extent = {
