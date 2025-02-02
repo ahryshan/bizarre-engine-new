@@ -25,6 +25,15 @@ impl<'q, D: QueryData> Query<'q, D> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn iter(&self) -> QueryIterator<'q, D> {
+        QueryIterator {
+            world: self.world,
+            entities: self.world.filter_entities(D::resource_ids().as_slice()),
+            index: 0,
+            _phantom: PhantomData,
+        }
+    }
 }
 
 impl<'q, D: QueryData> SystemParam for Query<'q, D> {

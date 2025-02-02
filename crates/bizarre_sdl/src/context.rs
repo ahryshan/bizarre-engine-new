@@ -16,7 +16,7 @@ thread_local! {
     static SDL_EVENTS: OnceCell<sdl::EventSubsystem> = OnceCell::new();
 }
 
-pub fn with_sdl_context<R, F: FnOnce(&Sdl) -> R>(f: F) -> R {
+pub fn with_sdl<R, F: FnOnce(&Sdl) -> R>(f: F) -> R {
     SDL_CONTEXT.with(|cell| {
         let ctx = cell.get_or_init(init_sdl);
         panic_on_wrong_thread();
@@ -62,11 +62,11 @@ fn init_sdl() -> sdl::Sdl {
 }
 
 fn init_video() -> sdl::VideoSubsystem {
-    with_sdl_context(|sdl| sdl.video())
+    with_sdl(|sdl| sdl.video())
         .unwrap_or_else(|err| panic!("Failed to initialize SDL video subsystem: {err}"))
 }
 
 fn init_events() -> sdl::EventSubsystem {
-    with_sdl_context(|sdl| sdl.event())
+    with_sdl(|sdl| sdl.event())
         .unwrap_or_else(|err| panic!("Failed to initialize SDL event subsystem: {err}"))
 }

@@ -5,7 +5,8 @@ use crate::scene::SceneHandle;
 
 pub struct RenderPackage {
     pub scene: SceneHandle,
-    pub pov: Mat4,
+    pub view: Mat4,
+    pub projection: Mat4,
 }
 
 #[derive(Resource)]

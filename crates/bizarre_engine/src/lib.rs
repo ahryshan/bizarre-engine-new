@@ -5,6 +5,7 @@ pub use bizarre_event as event;
 pub use bizarre_log as log;
 pub use bizarre_render as render;
 pub use bizarre_sdl as sdl;
+pub use bizarre_utils as util;
 
 pub mod ecs_modules;
 

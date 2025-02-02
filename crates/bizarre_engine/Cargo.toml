@@ -11,6 +11,7 @@ bizarre_event = { version = "0.1.0", path = "../bizarre_event" }
 bizarre_log = {version = "0.1.0", path = "../bizarre_log"}
 bizarre_render = { version = "0.1.0", path = "../bizarre_render" }
 bizarre_sdl = { version = "0.1.0", path = "../bizarre_sdl" }
+bizarre_utils = { version = "0.1.0", path = "../bizarre_utils" }
 
 nalgebra-glm = { workspace = true }
 

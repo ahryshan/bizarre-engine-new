@@ -38,6 +38,7 @@ pub enum InputEvent {
     MouseMoved {
         window: WindowHandle,
         pos: IVec2,
+        relative_motion: IVec2,
     },
     MouseScrolled {
         window: WindowHandle,
@@ -93,10 +94,16 @@ impl InputEvent {
                 pos: IVec2::new(*x, *y),
             }),
             SdlEvent::MouseMotion {
-                window_id, x, y, ..
+                window_id,
+                x,
+                y,
+                xrel,
+                yrel,
+                ..
             } => Some(InputEvent::MouseMoved {
                 pos: IVec2::new(*x, *y),
                 window: WindowHandle::from_raw(*window_id as usize),
+                relative_motion: IVec2::new(*xrel, *yrel),
             }),
             SdlEvent::MouseWheel {
                 window_id,

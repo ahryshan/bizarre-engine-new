@@ -7,6 +7,7 @@ edition = "2021"
 bizarre_log = { version = "0.1.0", path = "../bizarre_log" }
 bizarre_ecs = { version = "0.1.0", path = "../bizarre_ecs" }
 bizarre_core = { version = "0.1.0", path = "../bizarre_core" }
+bizarre_utils = { version = "0.1.0", path = "../bizarre_utils" }
 
 thiserror = { workspace = true }
 nalgebra-glm = { workspace = true }

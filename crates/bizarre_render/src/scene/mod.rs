@@ -56,7 +56,7 @@ const INITIAL_INDEX_LEN: usize = 50_000;
 const INITIAL_INSTANCE_LEN: usize = 2000;
 const INITIAL_INDIRECT_LEN: usize = 1024;
 
-#[repr(C, align(4))]
+#[repr(C, align(16))]
 #[derive(Clone, Debug)]
 pub struct SceneUniform {
     pub view: Mat4,

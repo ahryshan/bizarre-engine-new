@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use bizarre_core::erased_buffer::ErasedSparseArray;
+use bizarre_core::{erased_buffer::ErasedSparseArray, Handle};
 use component_batch::ComponentBatch;
 
 use crate::{
@@ -23,6 +23,9 @@ pub trait Component: Resource {
         let _ = world;
     }
 }
+
+impl<T: 'static> Resource for Handle<T> {}
+impl<T: 'static> Component for Handle<T> {}
 
 pub struct ComponentRegistry {
     storages: Vec<Option<ErasedSparseArray>>,

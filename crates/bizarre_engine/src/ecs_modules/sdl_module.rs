@@ -8,7 +8,7 @@ use bizarre_ecs::{
 use bizarre_event::{EventQueue, Events};
 use bizarre_log::core_info;
 use bizarre_sdl::{
-    context::{with_sdl_context, with_sdl_events},
+    context::{with_sdl, with_sdl_events},
     input::{InputEvent, InputState},
     window::{try_handle_sdl_event, WindowCreateInfo, WindowEvent, WindowHandle, Windows},
 };
@@ -65,7 +65,7 @@ fn update_input_state(mut input: ResMut<InputState>, events: Events<InputEvent>)
 }
 
 fn push_sdl_events(windows: Res<Windows>, mut event_queue: ResMut<EventQueue>) {
-    with_sdl_context(|sdl| {
+    with_sdl(|sdl| {
         sdl.event_pump()
             .unwrap()
             .poll_iter()

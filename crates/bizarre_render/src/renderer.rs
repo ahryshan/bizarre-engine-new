@@ -160,13 +160,16 @@ impl VulkanRenderer {
 
         let RenderPackage {
             scene: scene_handle,
-            pov,
+            view,
+            projection,
         } = render_package;
 
         let device = get_device();
 
         // TODO: I'm really sorry for what I've done. But it's safe, I'm promise. I'll fix that later
         let scene = unsafe { &mut *(assets.scenes.get_mut(&scene_handle).unwrap() as *mut Scene) };
+
+        scene.update_scene_uniform(SceneUniform { view, projection });
 
         scene.sync_frame_data(&assets.meshes);
 

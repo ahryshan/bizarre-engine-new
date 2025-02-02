@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+nalgebra-glm = {workspace = true}
+
 bizarre_utils_proc_macro = { version = "0.1.0", path = "macros" }

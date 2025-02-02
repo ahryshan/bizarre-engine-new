@@ -10,18 +10,20 @@ use bizarre_engine::{
     prelude::{Res, ResMut, *},
     render::{
         material::builtin::basic_deferred,
-        present_target::{PresentError, PresentTargetHandle},
+        present_target::{self, PresentError, PresentTargetHandle},
         render_assets::{AssetStore, RenderAssets},
+        render_components::camera::{Camera, CameraProjection, CameraView, PerspectiveProjection},
         render_target::RenderTargetHandle,
         renderer::{RenderError, VulkanRenderer},
         scene::{SceneHandle, SceneUniform},
         submitter::RenderPackage,
     },
     sdl::window::{WindowCreateInfo, WindowEvent, WindowPosition, Windows},
+    util::glm_ext::Vec3Ext,
 };
 
-use nalgebra_glm::{look_at, perspective, Mat4, UVec2, Vec3};
-use sandbox_module::SandboxModule;
+use nalgebra_glm::{look_at, perspective, quat_angle_axis, Mat4, Quat, UVec2, Vec2, Vec3};
+use sandbox_module::{default_sandbox_camera, PlayerController, SandboxCamera, SandboxModule};
 
 mod sandbox_module;
 
@@ -42,7 +44,7 @@ impl EcsModule for RenderModule {
         let main_window = world
             .resource_mut::<Windows>()
             .unwrap()
-            .get_main_window()
+            .main_window()
             .unwrap();
 
         let mut assets = RenderAssets::new();
@@ -68,18 +70,22 @@ impl EcsModule for RenderModule {
         let (instance_handle, _) = assets.create_material_instance(material).unwrap();
 
         let scene_handle = assets.create_scene(image_count);
-        let scene = assets.scene_mut(&scene_handle).unwrap();
 
-        let view = default_view();
+        let size = assets
+            .present_targets
+            .get(&present_target_handle)
+            .unwrap()
+            .size();
 
-        let projection = perspective(
-            width as f32 / height as f32,
-            90.0f32.to_radians(),
-            0.1,
-            1000.0,
-        );
+        let camera = default_sandbox_camera(size.cast::<f32>());
 
-        scene.update_scene_uniform(SceneUniform { view, projection });
+        world.spawn_entity((
+            MainRender,
+            PlayerController,
+            render_target,
+            present_target_handle,
+            camera,
+        ));
 
         world.insert_resource(MainPresentTarget(present_target_handle));
         world.insert_resource(MainRenderTarget(render_target));
@@ -87,27 +93,70 @@ impl EcsModule for RenderModule {
         world.insert_resource(renderer);
         world.insert_resource(assets);
 
+        world.add_systems(Schedule::Preupdate, resize_render_present_targets);
         world.add_systems(Schedule::Update, render);
     }
 }
 
-fn default_view() -> Mat4 {
-    look_at(
-        &Vec3::new(3.0, 20.0, 5.0),
-        &Vec3::zeros(),
-        &Vec3::new(0.0, 1.0, 0.0),
-    )
+#[derive(Component)]
+pub struct MainRender;
+
+fn resize_render_present_targets(
+    window_events: Events<WindowEvent>,
+    targets: Query<(
+        &PresentTargetHandle,
+        &RenderTargetHandle,
+        &mut SandboxCamera,
+    )>,
+    mut assets: ResMut<RenderAssets>,
+) {
+    for event in window_events {
+        match event {
+            WindowEvent::Resized {
+                handle: window_handle,
+                size,
+            } => {
+                if size.x != 0 && size.y != 0 {
+                    for (present_handle, render_handle, camera) in targets.iter() {
+                        if present_handle != &PresentTargetHandle::from_raw(window_handle.as_raw())
+                        {
+                            continue;
+                        }
+
+                        assets
+                            .present_targets
+                            .get_mut(present_handle)
+                            .unwrap()
+                            .resize();
+
+                        assets
+                            .render_targets
+                            .get_mut(render_handle)
+                            .unwrap()
+                            .resize(size);
+
+                        camera.resize(&Vec2::new(size.x as f32, size.y as f32));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn render(
     mut renderer: ResMut<VulkanRenderer>,
     mut assets: ResMut<RenderAssets>,
     mut last_render: Local<Instant>,
-    present_target: Res<MainPresentTarget>,
-    render_target: Res<MainRenderTarget>,
     scene_handle: Res<MainScene>,
     window_events: Events<WindowEvent>,
     mut skip_render: Local<bool>,
+    main_render_view: Query<(
+        &MainRender,
+        &mut SandboxCamera,
+        &PresentTargetHandle,
+        &RenderTargetHandle,
+    )>,
 ) {
     let elapsed = last_render.elapsed();
     let target = Duration::from_millis(16);
@@ -117,37 +166,16 @@ fn render(
         *last_render = Instant::now();
     }
 
+    let (main_render, camera, present_target, render_target) =
+        main_render_view.iter().next().unwrap();
+
+    let present_target = *present_target;
+    let render_target = *render_target;
+
     for event in window_events {
         match event {
             WindowEvent::Resized { size, .. } if size.x == 0 || size.y == 0 => *skip_render = true,
-            WindowEvent::Resized { handle, size } => {
-                let handle = PresentTargetHandle::from_raw(handle.as_raw());
-                let present_target = assets.present_target_mut(&handle).unwrap();
-                present_target.resize().unwrap();
-
-                assets
-                    .render_targets
-                    .get_mut(&render_target.0)
-                    .unwrap()
-                    .resize(size)
-                    .unwrap();
-
-                let view = default_view();
-
-                let projection = perspective(
-                    size.x as f32 / size.y as f32,
-                    90.0f32.to_radians(),
-                    0.1,
-                    1000.0,
-                );
-
-                assets
-                    .scene_mut(&scene_handle.0)
-                    .unwrap()
-                    .update_scene_uniform(SceneUniform { view, projection });
-
-                *skip_render = false
-            }
+            WindowEvent::Resized { handle, size } => *skip_render = false,
             WindowEvent::Exposed(..) => *skip_render = false,
             WindowEvent::Hidden(..) => *skip_render = true,
             _ => (),
@@ -159,23 +187,18 @@ fn render(
     }
 
     let render_package = RenderPackage {
-        pov: Mat4::default(),
         scene: SceneHandle::from_raw(0usize),
+        view: camera.view_matrix(),
+        projection: camera.projection_matrix(),
     };
 
-    let render_extent = {
-        assets
-            .present_targets
-            .get(&present_target.0)
-            .unwrap()
-            .size()
-    };
+    let render_extent = { assets.present_targets.get(&present_target).unwrap().size() };
 
     let render_result =
-        renderer.render_to_target(&mut assets, render_target.0, render_extent, render_package);
+        renderer.render_to_target(&mut assets, render_target, render_extent, render_package);
 
     let present_result = match render_result {
-        Ok(()) => renderer.present_to_target(&mut assets, present_target.0, render_target.0),
+        Ok(()) => renderer.present_to_target(&mut assets, present_target, render_target),
         Err(RenderError::RenderSkipped) => Err(PresentError::PresentSkipped),
         Err(err) => panic!("Failed render: {err:?}"),
     };

@@ -5,6 +5,7 @@ use bizarre_ecs::prelude::Resource;
 use nalgebra_glm::IVec2;
 use nalgebra_glm::UVec2;
 
+use crate::context::with_sdl;
 use crate::context::with_sdl_video;
 
 pub mod create_info;
@@ -55,8 +56,12 @@ impl Windows {
         self.main_window = Some(handle)
     }
 
-    pub fn get_main_window(&self) -> Option<&Window> {
+    pub fn main_window(&self) -> Option<&Window> {
         self.windows.get(self.main_window.as_ref()?)
+    }
+
+    pub fn get_main_window_mut(&mut self) -> Option<&mut Window> {
+        self.windows.get_mut(self.main_window.as_ref()?)
     }
 }
 
